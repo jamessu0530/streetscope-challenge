@@ -21,13 +21,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-import 'services/theme_service.dart';
 import 'screens/home_page.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load(fileName: '.env', isOptional: true);
-  await ThemeService.instance.load();
   runApp(const GeoGuesserApp());
 }
 
@@ -36,42 +34,14 @@ class GeoGuesserApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<ThemeMode>(
-      valueListenable: ThemeService.instance.mode,
-      builder: (BuildContext context, ThemeMode mode, _) {
-        return MaterialApp(
-          title: 'GeoGuesser 地理猜謎',
-          debugShowCheckedModeBanner: false,
-          themeMode: mode,
-          theme: ThemeData(
-            colorSchemeSeed: Colors.indigo,
-            useMaterial3: true,
-            brightness: Brightness.light,
-          ),
-          darkTheme: ThemeData(
-            colorSchemeSeed: Colors.indigo,
-            useMaterial3: true,
-            brightness: Brightness.dark,
-            scaffoldBackgroundColor: const Color(0xFF0C0F14),
-          ),
-          builder: (BuildContext context, Widget? child) {
-            if (child == null) return const SizedBox.shrink();
-            final bool isDark = Theme.of(context).brightness == Brightness.dark;
-            if (!isDark) return child;
-            return Stack(
-              children: <Widget>[
-                child,
-                IgnorePointer(
-                  child: Container(
-                    color: Colors.black.withValues(alpha: 0.18),
-                  ),
-                ),
-              ],
-            );
-          },
-          home: const HomePage(),
-        );
-      },
+    return MaterialApp(
+      title: 'GeoGuesser 地理猜謎',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        colorSchemeSeed: Colors.indigo,
+        useMaterial3: true,
+      ),
+      home: const HomePage(),
     );
   }
 }

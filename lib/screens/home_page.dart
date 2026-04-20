@@ -20,7 +20,6 @@ import '../data/game_constants.dart';
 import '../models/game_region.dart';
 import '../models/game_settings.dart';
 import '../services/audio_service.dart';
-import '../services/theme_service.dart';
 import '../widgets/matchday_ui.dart';
 import 'leaderboard_page.dart';
 import 'mode_selection_page.dart';
@@ -64,7 +63,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    final bool isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
       backgroundColor: MatchdayPalette.bg,
       body: SafeArea(
@@ -77,22 +75,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               const MatchdayTopTicker(
                 label: 'LIVE · MATCHDAY READY',
                 trailing: 'STEP · 01 / 02',
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
-                child: Row(
-                  children: <Widget>[
-                    const Spacer(),
-                    OutlinedButton.icon(
-                      onPressed: _toggleNightMode,
-                      icon: Icon(
-                        isDark ? Icons.light_mode : Icons.dark_mode,
-                        size: 16,
-                      ),
-                      label: Text(isDark ? '日間模式' : '深夜模式'),
-                    ),
-                  ],
-                ),
               ),
               const SizedBox(height: 20),
               const _Masthead(ink: MatchdayPalette.ink),
@@ -156,11 +138,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
     if (!mounted) return;
     AudioService.instance.startHomeBgm();
-  }
-
-  Future<void> _toggleNightMode() async {
-    AudioService.instance.playClick();
-    await ThemeService.instance.toggle();
   }
 }
 
