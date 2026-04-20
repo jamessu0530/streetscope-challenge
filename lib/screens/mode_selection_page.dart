@@ -110,7 +110,7 @@ class _ModeSelectionPageState extends State<ModeSelectionPage>
                   children: <Widget>[
                     const MatchdaySectionHeader(
                       label: 'SELECT FIXTURE',
-                      trailing: 'TAP TO KICKOFF',
+                      trailing: 'TAP TO START',
                     ),
                     const SizedBox(height: 6),
                     Container(height: 2, color: MatchdayPalette.ink),
@@ -121,7 +121,7 @@ class _ModeSelectionPageState extends State<ModeSelectionPage>
               MatchdayModeCard(
                 bg: MatchdayPalette.pink,
                 index: '01',
-                kickoff: '16:00',
+                kickoff: 'MODE 1',
                 title: 'MOVE',
                 subtitle: '完整模式',
                 tagline: 'WALK THE STREETS',
@@ -132,7 +132,7 @@ class _ModeSelectionPageState extends State<ModeSelectionPage>
               MatchdayModeCard(
                 bg: MatchdayPalette.blue,
                 index: '02',
-                kickoff: '18:30',
+                kickoff: 'MODE 2',
                 title: 'NO MOVE',
                 subtitle: '鏡頭旋轉',
                 tagline: 'STAND & OBSERVE',
@@ -143,7 +143,7 @@ class _ModeSelectionPageState extends State<ModeSelectionPage>
               MatchdayModeCard(
                 bg: MatchdayPalette.green,
                 index: '03',
-                kickoff: '20:45',
+                kickoff: 'MODE 3',
                 title: 'PICTURE',
                 subtitle: '完全靜態',
                 tagline: 'ONE SHOT · NO MOVES',

@@ -305,7 +305,10 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (BuildContext context) => ResultPage(results: _results),
+          builder: (BuildContext context) => ResultPage(
+            results: _results,
+            settings: widget.settings,
+          ),
         ),
       );
       return;

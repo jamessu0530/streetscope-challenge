@@ -20,7 +20,9 @@ import '../data/game_constants.dart';
 import '../models/game_region.dart';
 import '../models/game_settings.dart';
 import '../services/audio_service.dart';
+import '../services/theme_service.dart';
 import '../widgets/matchday_ui.dart';
+import 'leaderboard_page.dart';
 import 'mode_selection_page.dart';
 
 class HomePage extends StatefulWidget {
@@ -46,7 +48,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    AudioService.instance.stopHomeBgm();
     super.dispose();
   }
 
@@ -63,6 +64,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    final bool isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
       backgroundColor: MatchdayPalette.bg,
       body: SafeArea(
@@ -75,6 +77,22 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               const MatchdayTopTicker(
                 label: 'LIVE · MATCHDAY READY',
                 trailing: 'STEP · 01 / 02',
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
+                child: Row(
+                  children: <Widget>[
+                    const Spacer(),
+                    OutlinedButton.icon(
+                      onPressed: _toggleNightMode,
+                      icon: Icon(
+                        isDark ? Icons.light_mode : Icons.dark_mode,
+                        size: 16,
+                      ),
+                      label: Text(isDark ? '日間模式' : '深夜模式'),
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: 20),
               const _Masthead(ink: MatchdayPalette.ink),
@@ -96,6 +114,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               ),
               const SizedBox(height: 24),
               _ContinueCta(onTap: _goToModeSelection),
+              const SizedBox(height: 10),
+              _LeaderboardCta(onTap: _goToLeaderboard),
               const SizedBox(height: 40),
               const MatchdayFooterStripe(),
             ],
@@ -124,6 +144,23 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     // 從選模式頁返回時確保 home BGM 還在；GamePage 進去會自己停，
     // ModeSelectionPage 會在返回時 restart。這裡當雙重保險。
     AudioService.instance.startHomeBgm();
+  }
+
+  Future<void> _goToLeaderboard() async {
+    AudioService.instance.playClick();
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute<void>(
+        builder: (BuildContext context) => const LeaderboardPage(),
+      ),
+    );
+    if (!mounted) return;
+    AudioService.instance.startHomeBgm();
+  }
+
+  Future<void> _toggleNightMode() async {
+    AudioService.instance.playClick();
+    await ThemeService.instance.toggle();
   }
 }
 
@@ -682,6 +719,26 @@ class _ContinueCta extends StatelessWidget {
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LeaderboardCta extends StatelessWidget {
+  final VoidCallback onTap;
+  const _LeaderboardCta({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: SizedBox(
+        height: 46,
+        child: OutlinedButton.icon(
+          onPressed: onTap,
+          icon: const Icon(Icons.leaderboard),
+          label: const Text('排行榜（最近 10 場 / 前 10 名）'),
         ),
       ),
     );
