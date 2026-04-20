@@ -1,0 +1,36 @@
+name: geo_guesser
+description: 一個簡單的 GeoGuessr 風格地理猜謎遊戲，作為 Flutter 大學作業範例。
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+  flutter: '>=3.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.6
+  # 真實 Google Map 用：點擊地圖、放標記、計算距離
+  google_maps_flutter: ^2.5.0
+  # Street View Metadata API
+  http: ^1.2.0
+  # 用 WebView 嵌 Maps JavaScript Street View，才有 GeoGuessr 那種沿路箭頭
+  webview_flutter: ^4.7.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+  flutter_launcher_icons: ^0.14.4
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/app_icon.png
+
+flutter_launcher_icons:
+  android: false
+  ios: true
+  image_path: assets/images/app_icon.png
+  remove_alpha_ios: true
