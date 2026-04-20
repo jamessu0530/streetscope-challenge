@@ -8,10 +8,15 @@ import UIKit
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-    // google_maps_flutter 在 iOS 上「必須」在建立任何 GoogleMap 之前初始化 API Key，
-    // 否則會在 GMSServices.checkServicePreconditions 直接 crash。
-    // TODO: 改成與 lib/main.dart 裡 kGoogleApiKey 相同的金鑰（Maps SDK for iOS 用）。
-    GMSServices.provideAPIKey("AIzaSyBTpFnJouBuKVdmv4y9QNeZIk1pzcuYK1k")
+    // google_maps_flutter 在 iOS 上「必須」先初始化 API Key。
+    // 改為從 Info.plist 讀取，避免硬編碼金鑰進 Git。
+    let key = (Bundle.main.object(forInfoDictionaryKey: "GOOGLE_MAPS_API_KEY") as? String)?
+      .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    if !key.isEmpty {
+      GMSServices.provideAPIKey(key)
+    } else {
+      assertionFailure("Missing GOOGLE_MAPS_API_KEY in Info.plist / xcconfig")
+    }
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 

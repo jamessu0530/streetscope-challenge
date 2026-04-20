@@ -24,6 +24,21 @@
 
 > `.env` 已加入 `.gitignore`，不會被上傳；只會上傳 `.env.example`。
 
+### iOS 原生（Google Maps SDK）金鑰設定
+
+iOS 端不能直接讀 Flutter 的 `.env`，請另外設定：
+
+1. 複製範本
+   ```bash
+   cp ios/Flutter/Secrets.xcconfig.example ios/Flutter/Secrets.xcconfig
+   ```
+2. 編輯 `ios/Flutter/Secrets.xcconfig`
+   ```txt
+   GOOGLE_MAPS_API_KEY=YOUR_REAL_KEY
+   ```
+
+`Secrets.xcconfig` 已在 `.gitignore`，不會被上傳。
+
 ---
 
 ## 一、專案結構
