@@ -5,6 +5,27 @@
 
 ---
 
+## 0. Google API Key（ENV）
+
+專案現在改成從環境讀取：
+
+1. 複製 `.env.example`：
+   ```bash
+   cp .env.example .env
+   ```
+2. 編輯 `.env`：
+   ```env
+   GOOGLE_API_KEY=YOUR_REAL_KEY
+   ```
+3. 或使用 CI / CLI 注入：
+   ```bash
+   flutter run --dart-define=GOOGLE_API_KEY=YOUR_REAL_KEY
+   ```
+
+> `.env` 已加入 `.gitignore`，不會被上傳；只會上傳 `.env.example`。
+
+---
+
 ## 一、專案結構
 
 ```

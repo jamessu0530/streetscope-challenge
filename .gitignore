@@ -36,6 +36,9 @@ migrate_working_dir/
 # 專案私密設定（含 Google API Key），請勿 commit。
 # 範本參考 lib/config/config.example.dart。
 lib/config/config.dart
+.env
+.env.*
+!.env.example
 
 # Symbolication related
 app.*.symbols

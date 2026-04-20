@@ -10,13 +10,25 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:geo_guesser/main.dart';
 
 void main() {
-  testWidgets('App shows home title', (WidgetTester tester) async {
+  testWidgets('App shows matchday home (step 1 of 2)',
+      (WidgetTester tester) async {
     await tester.pumpWidget(const GeoGuesserApp());
 
-    expect(find.text('GeoGuesser'), findsOneWidget);
-    // 首頁應顯示三個模式按鈕
-    expect(find.text('完整 Move'), findsOneWidget);
-    expect(find.text('No Move'), findsOneWidget);
-    expect(find.text('Picture'), findsOneWidget);
+    // Brand mark
+    expect(find.text('LOL'), findsOneWidget);
+    expect(find.text('CATION'), findsOneWidget);
+    expect(find.text('LOLCATION'), findsOneWidget);
+
+    // Setup section on home page
+    expect(find.text('GAME SETUP'), findsOneWidget);
+
+    // CTA to next page
+    expect(find.text('MATCHDAY →'), findsOneWidget);
+
+    // Three mode cards should NOT appear here anymore — they're on
+    // ModeSelectionPage now.
+    expect(find.text('MOVE'), findsNothing);
+    expect(find.text('NO MOVE'), findsNothing);
+    expect(find.text('PICTURE'), findsNothing);
   });
 }

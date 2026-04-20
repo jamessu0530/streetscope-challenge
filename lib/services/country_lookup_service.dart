@@ -12,10 +12,10 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
-import '../config/config.dart';
+import '../config/env.dart';
 
 Future<String?> lookupCountryName(double lat, double lng) async {
-  if (kGoogleApiKey == 'YOUR_GOOGLE_API_KEY' || kGoogleApiKey.isEmpty) {
+  if (!hasGoogleApiKey) {
     return null;
   }
   final Uri uri = Uri.parse(

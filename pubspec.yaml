@@ -17,6 +17,9 @@ dependencies:
   http: ^1.2.0
   # 用 WebView 嵌 Maps JavaScript Street View，才有 GeoGuessr 那種沿路箭頭
   webview_flutter: ^4.7.0
+  # BGM / 音效播放
+  audioplayers: ^6.1.0
+  flutter_dotenv: ^6.0.0
 
 dev_dependencies:
   flutter_test:
@@ -27,10 +30,15 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/images/app_icon.png
+    - .env
+    - flutterproject4icon.png
+    - assets/audio/lofi_bgm.mp3
+    - assets/audio/home_bgm.mp3
+    - assets/audio/tick.ogg
+    - assets/audio/click.ogg
 
 flutter_launcher_icons:
   android: false
   ios: true
-  image_path: assets/images/app_icon.png
+  image_path: flutterproject4icon.png
   remove_alpha_ios: true

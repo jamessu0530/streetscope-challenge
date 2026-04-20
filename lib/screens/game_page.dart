@@ -16,10 +16,11 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import '../data/game_constants.dart';
 import '../models/game_mode.dart';
-import '../models/game_region.dart';
+import '../models/game_settings.dart';
 import '../models/guess_result.dart';
 import '../models/meme_result.dart';
 import '../models/place.dart';
+import '../services/audio_service.dart';
 import '../services/country_lookup_service.dart';
 import '../services/meme_service.dart';
 import '../services/place_picker_service.dart';
@@ -30,23 +31,22 @@ import '../widgets/meme_punishment_overlay.dart';
 import '../widgets/street_view_panel.dart';
 import 'result_page.dart';
 
+/// 倒數剩餘秒數 ≤ 此值 → 開始播 lofi BGM（一開始太吵，最後衝刺再出來比較有感）
+const int kBgmStartRemainingSeconds = 30;
+
 class GamePage extends StatefulWidget {
-  final GameMode mode;
-  final GameRegion region;
-  final int secondsPerRound;
+  final GameSettings settings;
 
   const GamePage({
     super.key,
-    this.mode = GameMode.move,
-    this.region = GameRegion.world,
-    this.secondsPerRound = kSecondsPerRound,
+    this.settings = const GameSettings(),
   });
 
   @override
   State<GamePage> createState() => _GamePageState();
 }
 
-class _GamePageState extends State<GamePage> {
+class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   List<Place>? _places;
   String? _loadError;
 
@@ -68,19 +68,43 @@ class _GamePageState extends State<GamePage> {
 
   GoogleMapController? _mapController;
 
+  /// 倒數 widget 的最新回呼值，用來決定什麼時候該播 tick。
+  int _lastTickSecond = -1;
+
   Place get _currentPlace => _places![_currentRound];
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initPlaces();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
+      AudioService.instance.pauseGameBgm();
+    } else if (state == AppLifecycleState.resumed) {
+      if (AudioService.instance.isGameBgmPlaying) {
+        AudioService.instance.resumeGameBgm();
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    AudioService.instance.stopGameBgm();
+    super.dispose();
   }
 
   Future<void> _initPlaces() async {
     try {
       final List<Place> picked = await generateRandomPlaces(
-        count: kRoundsPerGame,
-        region: widget.region,
+        count: widget.settings.roundsPerGame,
+        region: widget.settings.region,
       );
       if (!mounted) return;
       setState(() => _places = picked);
@@ -117,7 +141,7 @@ class _GamePageState extends State<GamePage> {
     try {
       final List<Place> fresh = await generateRandomPlaces(
         count: 1,
-        region: widget.region,
+        region: widget.settings.region,
       );
       if (!mounted) return;
       if (_submitted) return;
@@ -157,11 +181,37 @@ class _GamePageState extends State<GamePage> {
       _mapOverlayOpen = true;
     });
 
+    // 送出就停 BGM；等下一題再視倒數重新啟動
+    AudioService.instance.stopGameBgm();
+
     // 低分懲罰：本回合 <1000 分 → 背景抓 meme 後疊加顯示。
     // 不 await，不阻塞主流程；抓到再更新狀態。
     if (result.score < kMemePunishmentScoreThreshold) {
       _triggerMemePunishment(result);
     }
+  }
+
+  /// 倒數每秒回呼：
+  /// - 剩餘 ≤ 30 秒 → 啟動 lofi BGM（若尚未啟動）
+  /// - 剩餘 ≤ 5 秒  → 每秒播一次 tick
+  void _handleCountdownTick(int remaining) {
+    // 低於 30 秒才開始鋪 lofi
+    if (remaining > 0 &&
+        remaining <= kBgmStartRemainingSeconds &&
+        !AudioService.instance.isGameBgmPlaying) {
+      AudioService.instance.startGameBgm();
+    }
+
+    if (remaining <= 0) {
+      _lastTickSecond = -1;
+      return;
+    }
+    if (remaining > kCountdownTickThresholdSeconds ||
+        remaining == _lastTickSecond) {
+      return;
+    }
+    _lastTickSecond = remaining;
+    AudioService.instance.playTick();
   }
 
   /// 背景流程：反查國家 → 抓 meme → 更新 UI。任何錯誤都吞掉，
@@ -268,12 +318,15 @@ class _GamePageState extends State<GamePage> {
       _mapOverlayOpen = false;
       _mapController = null;
       _timerKey = UniqueKey();
+      _lastTickSecond = -1;
       // 清掉上一回合的 meme 彩蛋
       _memeOverlayOpen = false;
       _memeOutcome = null;
       _memeLoading = false;
       _memeRequestSeq++;
     });
+    // 下一題一開始先靜音；要等倒數再度 ≤ 30 秒才播。
+    AudioService.instance.stopGameBgm();
   }
 
   @override
@@ -306,8 +359,9 @@ class _GamePageState extends State<GamePage> {
                   )
                 : CountdownTimerWidget(
                     key: _timerKey,
-                    totalSeconds: widget.secondsPerRound,
+                    totalSeconds: widget.settings.secondsPerRound,
                     onTimeUp: _handleTimeUp,
+                    onTick: _handleCountdownTick,
                   ),
           ),
         ],
@@ -370,15 +424,16 @@ class _GamePageState extends State<GamePage> {
               //   - 自動重抽 / 換回合 → didUpdateWidget 看到 place 變且旗標未設 → reload
               key: ValueKey<int>(_currentRound),
               place: place,
-              mode: widget.mode,
+              mode: widget.settings.mode,
               // No Move / Picture 模式不會在街景中走動，所以不需要 onPlaceChanged。
-              onPlaceChanged: widget.mode == GameMode.move
+              onPlaceChanged: widget.settings.mode == GameMode.move
                   ? _handleStreetViewPlaceChanged
                   : null,
               onNeedsRepick: _handleStreetViewNeedsRepick,
               // 把「打開地圖選位置」整合進街景右上角的 icon
               onOpenMap: _submitted ? null : _openMap,
               hasGuess: hasGuess,
+              maxMoveSteps: widget.settings.maxMoveSteps,
             ),
           ),
           const SizedBox(height: 12),

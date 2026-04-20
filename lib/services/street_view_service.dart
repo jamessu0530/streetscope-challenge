@@ -14,7 +14,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
-import '../config/config.dart';
+import '../config/env.dart';
 import '../models/place.dart';
 
 /// Metadata 裡單一「可走方向」：與官方 maps 街景地上箭頭同源。
@@ -102,7 +102,7 @@ Future<PanoramaMetadata?> fetchPanoramaMetadata({
   double? lng,
   int? radiusMeters,
 }) async {
-  if (kGoogleApiKey == 'YOUR_GOOGLE_API_KEY' || kGoogleApiKey.isEmpty) {
+  if (!hasGoogleApiKey) {
     return null;
   }
   if (panoId != null && panoId.isNotEmpty) {
@@ -149,7 +149,7 @@ Future<PanoramaMetadata?> findNearestPanoramaMetadata(
   double lat,
   double lng,
 ) async {
-  if (kGoogleApiKey == 'YOUR_GOOGLE_API_KEY' || kGoogleApiKey.isEmpty) {
+  if (!hasGoogleApiKey) {
     return null;
   }
 
@@ -168,7 +168,7 @@ Future<PanoramaMetadata?> findNearbyPanoramaMetadata(
   double lat,
   double lng,
 ) async {
-  if (kGoogleApiKey == 'YOUR_GOOGLE_API_KEY' || kGoogleApiKey.isEmpty) {
+  if (!hasGoogleApiKey) {
     return null;
   }
   const List<int> radiiMeters = <int>[60, 200, 600, 2000];
@@ -201,4 +201,3 @@ String streetViewStaticImageUrl(
   }
   return '$base&location=${place.latitude},${place.longitude}';
 }
-

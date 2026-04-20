@@ -21,7 +21,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
-import '../config/config.dart';
+import '../config/env.dart';
 import '../models/game_mode.dart';
 import '../models/place.dart';
 
@@ -42,6 +42,9 @@ class StreetViewPanel extends StatefulWidget {
   /// 是否已有猜測（決定右上 icon 是否顯示一個小徽章）。
   final bool hasGuess;
 
+  /// Move 模式下可以走幾步。0 = 不限。
+  final int maxMoveSteps;
+
   const StreetViewPanel({
     super.key,
     required this.place,
@@ -51,6 +54,7 @@ class StreetViewPanel extends StatefulWidget {
     this.mode = GameMode.move,
     this.onOpenMap,
     this.hasGuess = false,
+    this.maxMoveSteps = 0,
   });
 
   @override
@@ -74,9 +78,20 @@ class _StreetViewPanelState extends State<StreetViewPanel> {
   /// 目前鏡頭朝向（度，0 = 正北，順時針）。供畫面右上角的指南針顯示。
   double _headingDeg = 0;
 
+  /// 已走的步數（每次 position_changed 且座標顯著不同時 +1）。
+  int _moveCount = 0;
+
+  /// 達到 maxMoveSteps 後，JS 側會關掉 links / clickToGo，避免繼續往前走。
+  bool _moveLocked = false;
+
   String get _hintText {
     switch (widget.mode) {
       case GameMode.move:
+        if (widget.maxMoveSteps > 0) {
+          final int left =
+              (widget.maxMoveSteps - _moveCount).clamp(0, widget.maxMoveSteps);
+          return '拖曳環視 ・ 步數剩 $left / ${widget.maxMoveSteps}';
+        }
         return '拖曳環視 ・ 點地上箭頭沿路走';
       case GameMode.noMove:
         return 'No Move ・ 只能旋轉鏡頭';
@@ -181,6 +196,15 @@ class _StreetViewPanelState extends State<StreetViewPanel> {
           // 標記：接下來父層會用新位置重建本 widget，不要把 WebView reload 掉。
           _ignoreNextExternalChange = true;
           widget.onPlaceChanged?.call(_currentPlace);
+          // 計算步數並在到達上限時鎖住移動
+          if (widget.mode == GameMode.move && widget.maxMoveSteps > 0) {
+            _moveCount += 1;
+            if (mounted) setState(() {});
+            if (!_moveLocked && _moveCount >= widget.maxMoveSteps) {
+              _moveLocked = true;
+              _controller.runJavaScript('setCanMove(false)').catchError((_) {});
+            }
+          }
           break;
         case 'status':
           final String status = (decoded['status'] as String?) ?? '';
@@ -212,7 +236,7 @@ class _StreetViewPanelState extends State<StreetViewPanel> {
   }
 
   String _buildHtml(Place place) {
-    const String key = kGoogleApiKey;
+    final String key = kGoogleApiKey;
     final String lat = place.latitude.toStringAsFixed(7);
     final String lng = place.longitude.toStringAsFixed(7);
     final String pano = place.panoId ?? '';
@@ -358,6 +382,14 @@ class _StreetViewPanelState extends State<StreetViewPanel> {
         if (z > 5) z = 5;
         panorama.setZoom(z);
       }
+      // Flutter 端的「可移動步數」達到上限時呼叫，關掉方向箭頭與點地移動。
+      function setCanMove(can) {
+        if (!panorama) return;
+        panorama.setOptions({
+          linksControl: !!can,
+          clickToGo: !!can
+        });
+      }
     </script>
     <script async defer
       src="https://maps.googleapis.com/maps/api/js?key=$key&callback=initPano&v=weekly">
@@ -369,12 +401,11 @@ class _StreetViewPanelState extends State<StreetViewPanel> {
 
   @override
   Widget build(BuildContext context) {
-    final bool missingKey =
-        kGoogleApiKey == 'YOUR_GOOGLE_API_KEY' || kGoogleApiKey.isEmpty;
+    final bool missingKey = !hasGoogleApiKey;
 
     if (missingKey) {
       return _placeholder(
-        '請在 lib/config/config.dart 設定 kGoogleApiKey\n'
+        '請設定 Google API Key（.env 或 --dart-define）\n'
         '並啟用 Maps JavaScript API + Street View Static API',
       );
     }
@@ -448,7 +479,7 @@ class _StreetViewPanelState extends State<StreetViewPanel> {
             ),
           ),
 
-        // 指南針：所有模式都顯示。配合太陽位置可推測南北半球。
+        // 指南針：一律顯示。配合太陽位置可推測南北半球。
         Positioned(
           left: 8,
           top: 8,
@@ -618,7 +649,7 @@ class _OpenMapFab extends StatelessWidget {
             children: [
               ClipOval(
                 child: Image.asset(
-                  'assets/images/app_icon.png',
+                  'flutterproject4icon.png',
                   width: 28,
                   height: 28,
                   fit: BoxFit.cover,
