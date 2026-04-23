@@ -34,6 +34,7 @@ class ResultPage extends StatefulWidget {
 
 class _ResultPageState extends State<ResultPage>
     with SingleTickerProviderStateMixin {
+  static const int _maxNameLength = 16;
   bool _saving = true;
   int? _highlightIndex;
   late final AnimationController _chartCtrl;
@@ -232,7 +233,7 @@ class _ResultPageState extends State<ResultPage>
             controller: _nameCtrl,
             onChanged: _onNameChanged,
             textCapitalization: TextCapitalization.characters,
-            maxLength: 8,
+            maxLength: _maxNameLength,
             style: const TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w800,

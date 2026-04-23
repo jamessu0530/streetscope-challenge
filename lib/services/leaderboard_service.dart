@@ -7,10 +7,12 @@ import '../models/leaderboard_entry.dart';
 class LeaderboardService {
   LeaderboardService._();
   static final LeaderboardService instance = LeaderboardService._();
+  static const int _kMaxNameLength = 16;
 
-  // v2：加入玩家名稱欄位（並順便清掉 v1 的自動生成假名）
-  static const String _kEntriesKey = 'leaderboard_entries_v2';
+  // v3：重置本機排行榜資料（清空舊資料並沿用新格式）
+  static const String _kEntriesKey = 'leaderboard_entries_v3';
   static const String _kLegacyKeyV1 = 'leaderboard_entries_v1';
+  static const String _kLegacyKeyV2 = 'leaderboard_entries_v2';
   static const int _kStorageCap = 200;
 
   /// 存一筆新紀錄，回傳該筆的 playedAt（供事後 updateEntryName 定位）。
@@ -20,8 +22,7 @@ class LeaderboardService {
     required String name,
   }) async {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
-    // 把 v1 舊資料丟掉，避免顯示自動生成、使用者不認得的名字
-    await prefs.remove(_kLegacyKeyV1);
+    await _purgeLegacyKeys(prefs);
 
     final List<LeaderboardEntry> entries = await loadAll();
     final int totalScore = results.fold<int>(
@@ -81,6 +82,7 @@ class LeaderboardService {
 
   Future<List<LeaderboardEntry>> loadAll() async {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
+    await _purgeLegacyKeys(prefs);
     final List<String> raw = prefs.getStringList(_kEntriesKey) ?? <String>[];
     final List<LeaderboardEntry> out = <LeaderboardEntry>[];
     for (final String row in raw) {
@@ -112,7 +114,14 @@ class LeaderboardService {
   String _sanitizeName(String raw) {
     final String trimmed = raw.trim();
     if (trimmed.isEmpty) return 'JAMES';
-    // 顯示是 arcade 等寬字，限制 8 字元避免欄位爆版
-    return trimmed.length > 8 ? trimmed.substring(0, 8) : trimmed;
+    // 與結算頁輸入限制保持一致，避免儲存時再被二次截斷。
+    return trimmed.length > _kMaxNameLength
+        ? trimmed.substring(0, _kMaxNameLength)
+        : trimmed;
+  }
+
+  Future<void> _purgeLegacyKeys(SharedPreferences prefs) async {
+    await prefs.remove(_kLegacyKeyV1);
+    await prefs.remove(_kLegacyKeyV2);
   }
 }

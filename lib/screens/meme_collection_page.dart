@@ -372,15 +372,19 @@ class _MemeThumb extends StatelessWidget {
                         letterSpacing: 0.5,
                       ),
                     ),
-                    const Spacer(),
-                    Text(
-                      'r/${meme.subreddit}',
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 9,
-                        fontWeight: FontWeight.w600,
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'r/${meme.subreddit}',
+                        textAlign: TextAlign.right,
+                        maxLines: 1,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),

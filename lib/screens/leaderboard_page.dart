@@ -7,6 +7,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../models/game_mode.dart';
+import '../models/game_region.dart';
 import '../models/leaderboard_entry.dart';
 import '../services/leaderboard_service.dart';
 import '../widgets/floating_home_nav_bar.dart';
@@ -23,10 +25,11 @@ enum _Tab { top, recent }
 class _LeaderboardPageState extends State<LeaderboardPage>
     with TickerProviderStateMixin {
   bool _loading = true;
-  List<LeaderboardEntry> _recent = <LeaderboardEntry>[];
-  List<LeaderboardEntry> _top = <LeaderboardEntry>[];
+  List<LeaderboardEntry> _all = <LeaderboardEntry>[];
   DateTime? _currentPlayedAt;
   _Tab _tab = _Tab.top;
+  GameMode? _modeFilter;
+  GameRegion? _regionFilter;
 
   late final AnimationController _countCtrl;
   late final AnimationController _blinkCtrl;
@@ -67,12 +70,7 @@ class _LeaderboardPageState extends State<LeaderboardPage>
   }
 
   Future<void> _load() async {
-    final List<LeaderboardEntry> all =
-        await LeaderboardService.instance.loadAll();
-    final List<LeaderboardEntry> recent =
-        await LeaderboardService.instance.loadRecent10();
-    final List<LeaderboardEntry> top =
-        await LeaderboardService.instance.loadTop10();
+    final List<LeaderboardEntry> all = await LeaderboardService.instance.loadAll();
     DateTime? currentPlayedAt;
     for (final LeaderboardEntry e in all) {
       if (currentPlayedAt == null || e.playedAt.isAfter(currentPlayedAt)) {
@@ -81,16 +79,34 @@ class _LeaderboardPageState extends State<LeaderboardPage>
     }
     if (!mounted) return;
     setState(() {
-      _recent = recent;
-      _top = top;
+      _all = all;
       _currentPlayedAt = currentPlayedAt;
       _loading = false;
     });
     _countCtrl.forward(from: 0);
   }
 
-  List<LeaderboardEntry> get _rows =>
-      _tab == _Tab.top ? _top : _recent;
+  List<LeaderboardEntry> get _rows {
+    final Iterable<LeaderboardEntry> filtered = _all.where((LeaderboardEntry e) {
+      final bool modeOk = _modeFilter == null || e.mode == _modeFilter;
+      final bool regionOk = _regionFilter == null || e.region == _regionFilter;
+      return modeOk && regionOk;
+    });
+    final List<LeaderboardEntry> rows = filtered.toList();
+    if (_tab == _Tab.top) {
+      rows.sort((LeaderboardEntry a, LeaderboardEntry b) {
+        final int scoreCmp = b.totalScore.compareTo(a.totalScore);
+        if (scoreCmp != 0) return scoreCmp;
+        return b.playedAt.compareTo(a.playedAt);
+      });
+    } else {
+      rows.sort(
+        (LeaderboardEntry a, LeaderboardEntry b) =>
+            b.playedAt.compareTo(a.playedAt),
+      );
+    }
+    return rows.take(10).toList();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -139,6 +155,8 @@ class _LeaderboardPageState extends State<LeaderboardPage>
         _buildTitle(),
         const SizedBox(height: 8),
         _buildTabs(),
+        const SizedBox(height: 8),
+        _buildFilters(),
         const SizedBox(height: 10),
         _buildColumnHeaders(),
         Padding(
@@ -286,6 +304,110 @@ class _LeaderboardPageState extends State<LeaderboardPage>
     );
   }
 
+  Widget _buildFilters() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 18),
+      child: Column(
+        children: <Widget>[
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: <Widget>[
+                _filterChip(
+                  label: 'ALL MODES',
+                  selected: _modeFilter == null,
+                  onTap: () => _setModeFilter(null),
+                ),
+                const SizedBox(width: 8),
+                _filterChip(
+                  label: 'MOVE',
+                  selected: _modeFilter == GameMode.move,
+                  onTap: () => _setModeFilter(GameMode.move),
+                ),
+                const SizedBox(width: 8),
+                _filterChip(
+                  label: 'NO MOVE',
+                  selected: _modeFilter == GameMode.noMove,
+                  onTap: () => _setModeFilter(GameMode.noMove),
+                ),
+                const SizedBox(width: 8),
+                _filterChip(
+                  label: 'PICTURE',
+                  selected: _modeFilter == GameMode.picture,
+                  onTap: () => _setModeFilter(GameMode.picture),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: <Widget>[
+                _filterChip(
+                  label: 'ALL REGIONS',
+                  selected: _regionFilter == null,
+                  onTap: () => _setRegionFilter(null),
+                ),
+                ...GameRegion.values.map((GameRegion region) {
+                  return Padding(
+                    padding: const EdgeInsets.only(left: 8),
+                    child: _filterChip(
+                      label: region.label.toUpperCase(),
+                      selected: _regionFilter == region,
+                      onTap: () => _setRegionFilter(region),
+                    ),
+                  );
+                }),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _filterChip({
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          border: Border.all(color: selected ? _accent : _dim, width: 1),
+          color: selected ? _accent.withValues(alpha: 0.12) : Colors.transparent,
+        ),
+        child: Text(
+          selected ? '[ $label ]' : '  $label  ',
+          style: TextStyle(
+            color: selected ? _accent : _dim,
+            fontSize: 10,
+            letterSpacing: 1.5,
+            fontWeight: FontWeight.w800,
+            fontFamily: 'Menlo',
+            fontFamilyFallback: _monoFallback,
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _setModeFilter(GameMode? mode) {
+    if (_modeFilter == mode) return;
+    setState(() => _modeFilter = mode);
+    _countCtrl.forward(from: 0);
+  }
+
+  void _setRegionFilter(GameRegion? region) {
+    if (_regionFilter == region) return;
+    setState(() => _regionFilter = region);
+    _countCtrl.forward(from: 0);
+  }
+
   Widget _buildList() {
     if (_rows.isEmpty) {
       return const Center(
@@ -333,7 +455,7 @@ class _LeaderboardPageState extends State<LeaderboardPage>
   }
 
   Widget _buildFooter() {
-    final int total = _recent.length;
+    final int total = _rows.length;
     // 多留 96 給底部浮動 nav bar，避免文字被蓋到
     return Padding(
       padding: EdgeInsets.fromLTRB(
