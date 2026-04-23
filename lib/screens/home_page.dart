@@ -20,8 +20,8 @@ import '../data/game_constants.dart';
 import '../models/game_region.dart';
 import '../models/game_settings.dart';
 import '../services/audio_service.dart';
+import '../widgets/floating_home_nav_bar.dart';
 import '../widgets/matchday_ui.dart';
-import 'leaderboard_page.dart';
 import 'mode_selection_page.dart';
 
 class HomePage extends StatefulWidget {
@@ -65,44 +65,50 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: MatchdayPalette.bg,
-      body: SafeArea(
-        bottom: false,
-        child: SingleChildScrollView(
-          padding: EdgeInsets.zero,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              const MatchdayTopTicker(
-                label: 'LIVE · MATCHDAY READY',
-                trailing: 'STEP · 01 / 02',
+      body: Stack(
+        children: <Widget>[
+          SafeArea(
+            bottom: false,
+            child: SingleChildScrollView(
+              // 底部多留 120px，避免內容被浮動 nav bar 蓋到
+              padding: const EdgeInsets.only(bottom: 120),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  const MatchdayTopTicker(
+                    label: 'LIVE · MATCHDAY READY',
+                    trailing: 'STEP · 01 / 02',
+                  ),
+                  const SizedBox(height: 20),
+                  const _Masthead(ink: MatchdayPalette.ink),
+                  const SizedBox(height: 22),
+                  _SetupSection(
+                    ink: MatchdayPalette.ink,
+                    yellow: MatchdayPalette.yellow,
+                    cream: MatchdayPalette.cream,
+                    region: _region,
+                    onRegionChanged: (GameRegion r) =>
+                        setState(() => _region = r),
+                    rounds: _roundsPerGame,
+                    onRoundsChanged: (int n) =>
+                        setState(() => _roundsPerGame = n),
+                    seconds: _secondsPerRound,
+                    onSecondsChanged: (int s) =>
+                        setState(() => _secondsPerRound = s),
+                    maxMoveSteps: _maxMoveSteps,
+                    onMoveStepsChanged: (int v) =>
+                        setState(() => _maxMoveSteps = v),
+                  ),
+                  const SizedBox(height: 24),
+                  _ContinueCta(onTap: _goToModeSelection),
+                  const SizedBox(height: 28),
+                  const MatchdayFooterStripe(),
+                ],
               ),
-              const SizedBox(height: 20),
-              const _Masthead(ink: MatchdayPalette.ink),
-              const SizedBox(height: 22),
-              _SetupSection(
-                ink: MatchdayPalette.ink,
-                yellow: MatchdayPalette.yellow,
-                cream: MatchdayPalette.cream,
-                region: _region,
-                onRegionChanged: (GameRegion r) => setState(() => _region = r),
-                rounds: _roundsPerGame,
-                onRoundsChanged: (int n) => setState(() => _roundsPerGame = n),
-                seconds: _secondsPerRound,
-                onSecondsChanged: (int s) =>
-                    setState(() => _secondsPerRound = s),
-                maxMoveSteps: _maxMoveSteps,
-                onMoveStepsChanged: (int v) =>
-                    setState(() => _maxMoveSteps = v),
-              ),
-              const SizedBox(height: 24),
-              _ContinueCta(onTap: _goToModeSelection),
-              const SizedBox(height: 10),
-              _LeaderboardCta(onTap: _goToLeaderboard),
-              const SizedBox(height: 40),
-              const MatchdayFooterStripe(),
-            ],
+            ),
           ),
-        ),
+          const FloatingHomeNavBar(current: HomeTab.home),
+        ],
       ),
     );
   }
@@ -125,18 +131,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (!mounted) return;
     // 從選模式頁返回時確保 home BGM 還在；GamePage 進去會自己停，
     // ModeSelectionPage 會在返回時 restart。這裡當雙重保險。
-    AudioService.instance.startHomeBgm();
-  }
-
-  Future<void> _goToLeaderboard() async {
-    AudioService.instance.playClick();
-    await Navigator.push<void>(
-      context,
-      MaterialPageRoute<void>(
-        builder: (BuildContext context) => const LeaderboardPage(),
-      ),
-    );
-    if (!mounted) return;
     AudioService.instance.startHomeBgm();
   }
 }
@@ -696,26 +690,6 @@ class _ContinueCta extends StatelessWidget {
               ),
             ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _LeaderboardCta extends StatelessWidget {
-  final VoidCallback onTap;
-  const _LeaderboardCta({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: SizedBox(
-        height: 46,
-        child: OutlinedButton.icon(
-          onPressed: onTap,
-          icon: const Icon(Icons.leaderboard),
-          label: const Text('排行榜（最近 10 場 / 前 10 名）'),
         ),
       ),
     );

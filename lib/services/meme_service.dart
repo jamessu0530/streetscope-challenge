@@ -35,6 +35,26 @@ const List<String> _kCoreMemeSubs = <String>[
   'memes',
   'dankmemes',
   'me_irl',
+  'funny',
+  'wholesomememes',
+  'historymemes',
+];
+
+/// 每次搜尋時用來增加「不同次不同結果」的排序與時間範圍選項。
+const List<String> _kSortModes = <String>['top', 'hot', 'relevance', 'new'];
+const List<String> _kTimeWindows = <String>['all', 'year', 'month', 'week'];
+
+/// 每次搜尋時隨機附加在 query 後面的修飾詞，讓同一國家每次都會打不同的 query。
+const List<String> _kQueryFlavors = <String>[
+  '',
+  'funny',
+  'joke',
+  'stereotype',
+  'vibes',
+  'tourist',
+  'travel',
+  'classic',
+  'throwback',
 ];
 
 /// 依國家名（英文）挑額外的社群 meme subreddits。
@@ -98,15 +118,24 @@ Future<PunishmentMemeOutcome> fetchPunishmentMeme({
     return PunishmentMemeOutcome.notTriggered(score);
   }
 
+  final math.Random rnd = math.Random();
+
   // Step 1: 依國家組第一個 query。country 可能是 null（反查失敗）。
+  //         為了「每次不一樣」，每次都會附加隨機 flavor + 隨機排序 / 時窗。
   if (country != null && country.trim().isNotEmpty) {
-    final String q1 = '$country meme';
+    final String flavor = _kQueryFlavors[rnd.nextInt(_kQueryFlavors.length)];
+    final String q1 =
+        flavor.isEmpty ? '$country meme' : '$country $flavor meme';
     final List<String> subs = <String>[
       ..._kCoreMemeSubs,
       ...(_kCountryExtraSubs[country] ?? const <String>[]),
-    ];
-    final MemeResult? m1 =
-        await _searchAndPick(subs: subs, query: q1, country: country);
+    ]..shuffle(rnd);
+    final MemeResult? m1 = await _searchAndPick(
+      subs: subs,
+      query: q1,
+      country: country,
+      rnd: rnd,
+    );
     if (m1 != null) {
       return PunishmentMemeOutcome(
         triggered: true,
@@ -117,10 +146,16 @@ Future<PunishmentMemeOutcome> fetchPunishmentMeme({
         fallbackUsed: false,
       );
     }
-    // Step 2: "country funny meme"，稍微不同的 query
-    final String q2 = '$country funny meme';
-    final MemeResult? m2 =
-        await _searchAndPick(subs: subs, query: q2, country: country);
+    // Step 2: 再換個 flavor 重試一次
+    final String flavor2 =
+        _kQueryFlavors[rnd.nextInt(_kQueryFlavors.length)];
+    final String q2 = '$country ${flavor2.isEmpty ? 'funny' : flavor2}';
+    final MemeResult? m2 = await _searchAndPick(
+      subs: subs,
+      query: q2,
+      country: country,
+      rnd: rnd,
+    );
     if (m2 != null) {
       return PunishmentMemeOutcome(
         triggered: true,
@@ -134,7 +169,6 @@ Future<PunishmentMemeOutcome> fetchPunishmentMeme({
   }
 
   // Step 3: fallback 嘲諷 query，隨機挑一個
-  final math.Random rnd = math.Random();
   final List<String> shuffled = List<String>.from(_kMockeryFallbackQueries)
     ..shuffle(rnd);
   for (final String q in shuffled) {
@@ -142,6 +176,7 @@ Future<PunishmentMemeOutcome> fetchPunishmentMeme({
       subs: _kCoreMemeSubs,
       query: q,
       country: country,
+      rnd: rnd,
     );
     if (m != null) {
       return PunishmentMemeOutcome(
@@ -170,14 +205,17 @@ Future<PunishmentMemeOutcome> fetchPunishmentMeme({
 // ------ 以下為內部實作 --------------------------------------------------------
 
 /// 打 Reddit 搜尋 → 過濾 → 排序 → 回單一 meme。
+/// 「每次不一樣」：我們先把排序前 N 名當候選池，再從池子裡 **隨機** 挑一張。
 Future<MemeResult?> _searchAndPick({
   required List<String> subs,
   required String query,
   required String? country,
+  required math.Random rnd,
 }) async {
   final List<_RedditPost> posts = await _searchReddit(
     subreddits: subs,
     query: query,
+    rnd: rnd,
   );
   if (posts.isEmpty) return null;
 
@@ -189,28 +227,38 @@ Future<MemeResult?> _searchAndPick({
 
   // 排序：依國家字串是否出現在 title、ups、是否明顯是 meme post
   cleaned.sort((a, b) => _score(b, country).compareTo(_score(a, country)));
-  final _RedditPost best = cleaned.first;
+
+  // 取前 N 名作為候選池（最多 12），再隨機挑一張。
+  // 池子太小時用整個 cleaned；避免永遠取第 0 名那種「每次結果都一樣」的情況。
+  final int poolSize = math.min(12, cleaned.length);
+  final List<_RedditPost> pool = cleaned.take(poolSize).toList();
+  final _RedditPost pick = pool[rnd.nextInt(pool.length)];
+
   return MemeResult(
-    title: best.title,
-    imageUrl: best.imageUrl!,
-    postUrl: best.permalink,
-    subreddit: best.subreddit,
-    ups: best.ups,
+    title: pick.title,
+    imageUrl: pick.imageUrl!,
+    postUrl: pick.permalink,
+    subreddit: pick.subreddit,
+    ups: pick.ups,
   );
 }
 
 /// 用 `r/a+b+c/search.json` 一次搜多個 subreddit，減少 round-trip。
+/// 每次隨機挑 sort / 時間範圍，最大化「每次都不同」的機率。
 Future<List<_RedditPost>> _searchReddit({
   required List<String> subreddits,
   required String query,
+  required math.Random rnd,
 }) async {
   final String subsJoined = subreddits.join('+');
+  final String sort = _kSortModes[rnd.nextInt(_kSortModes.length)];
+  final String tWin = _kTimeWindows[rnd.nextInt(_kTimeWindows.length)];
   final Uri uri = Uri.parse(
     'https://www.reddit.com/r/$subsJoined/search.json'
     '?q=${Uri.encodeQueryComponent(query)}'
     '&restrict_sr=on'
-    '&sort=top'
-    '&t=all'
+    '&sort=$sort'
+    '&t=$tWin'
     '&limit=$_kSearchLimit'
     '&include_over_18=false',
   );

@@ -16,6 +16,12 @@ class GuessMap extends StatefulWidget {
   final LatLng? guessedLocation;
   final LatLng? correctLocation;
 
+  /// 外層圓角。全螢幕地圖 overlay 會傳 0 避免四角留白。
+  final double cornerRadius;
+
+  /// 縮放按鈕與底部的距離，避免與浮動按鈕 / 版權字重疊。
+  final double bottomInset;
+
   const GuessMap({
     super.key,
     required this.onGuessChanged,
@@ -23,6 +29,8 @@ class GuessMap extends StatefulWidget {
     this.locked = false,
     this.guessedLocation,
     this.correctLocation,
+    this.cornerRadius = 12,
+    this.bottomInset = 16,
   });
 
   @override
@@ -95,7 +103,7 @@ class _GuessMapState extends State<GuessMap> {
     }
 
     return ClipRRect(
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(widget.cornerRadius),
       child: Stack(
         children: [
           GoogleMap(
@@ -119,7 +127,7 @@ class _GuessMapState extends State<GuessMap> {
           ),
           Positioned(
             right: 10,
-            bottom: 16,
+            bottom: widget.bottomInset,
             child: _ZoomButtonColumn(
               onZoomIn: _zoomIn,
               onZoomOut: _zoomOut,

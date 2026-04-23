@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 
 import '../models/leaderboard_entry.dart';
 import '../services/leaderboard_service.dart';
+import '../widgets/floating_home_nav_bar.dart';
 
 class LeaderboardPage extends StatefulWidget {
   const LeaderboardPage({super.key});
@@ -100,32 +101,31 @@ class _LeaderboardPageState extends State<LeaderboardPage>
       ),
       child: Scaffold(
         backgroundColor: _bg,
-        body: SafeArea(
-          child: Stack(
-            children: <Widget>[
-              Positioned.fill(
-                child: _loading
-                    ? const Center(
-                        child: Text(
-                          'LOADING...',
-                          style: TextStyle(
-                            color: _dim,
-                            fontSize: 14,
-                            letterSpacing: 4,
-                            fontFamily: 'Menlo',
-                            fontFamilyFallback: _monoFallback,
-                          ),
+        body: Stack(
+          children: <Widget>[
+            SafeArea(
+              child: _loading
+                  ? const Center(
+                      child: Text(
+                        'LOADING...',
+                        style: TextStyle(
+                          color: _dim,
+                          fontSize: 14,
+                          letterSpacing: 4,
+                          fontFamily: 'Menlo',
+                          fontFamilyFallback: _monoFallback,
                         ),
-                      )
-                    : _buildBody(),
+                      ),
+                    )
+                  : _buildBody(),
+            ),
+            const Positioned.fill(
+              child: IgnorePointer(
+                child: _ScanlineOverlay(),
               ),
-              const Positioned.fill(
-                child: IgnorePointer(
-                  child: _ScanlineOverlay(),
-                ),
-              ),
-            ],
-          ),
+            ),
+            const FloatingHomeNavBar(current: HomeTab.leaderboard),
+          ],
         ),
       ),
     );
@@ -334,12 +334,13 @@ class _LeaderboardPageState extends State<LeaderboardPage>
 
   Widget _buildFooter() {
     final int total = _recent.length;
+    // 多留 96 給底部浮動 nav bar，避免文字被蓋到
     return Padding(
       padding: EdgeInsets.fromLTRB(
         16,
         8,
         16,
-        8 + MediaQuery.of(context).padding.bottom,
+        8 + 96 + MediaQuery.of(context).padding.bottom,
       ),
       child: AnimatedBuilder(
         animation: _blinkCtrl,

@@ -11,6 +11,8 @@
 //   - 送出答案 → 結算疊加層 → 「查看地圖」開啟答案地圖
 // =============================================================================
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
@@ -22,6 +24,7 @@ import '../models/meme_result.dart';
 import '../models/place.dart';
 import '../services/audio_service.dart';
 import '../services/country_lookup_service.dart';
+import '../services/meme_collection_service.dart';
 import '../services/meme_service.dart';
 import '../services/place_picker_service.dart';
 import '../utils/map_utils.dart';
@@ -240,6 +243,14 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         _memeOutcome = outcome;
         _memeLoading = false;
       });
+      // 有抓到 meme 就順手存進「迷因收集庫」。失敗就算了，不影響主流程。
+      if (outcome.selectedMeme != null) {
+        unawaited(MemeCollectionService.instance.add(
+          meme: outcome.selectedMeme!,
+          country: outcome.country,
+          score: outcome.score,
+        ));
+      }
     } catch (_) {
       if (!mounted) return;
       if (seq != _memeRequestSeq) return;
@@ -343,34 +354,29 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     final GuessResult? summaryResult =
         _results.isNotEmpty ? _results.last : null;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('第 ${_currentRound + 1} / ${_places!.length} 回合'),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: _submitted
-                ? Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 6),
-                    child: Text(
-                      '已提交',
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  )
-                : CountdownTimerWidget(
-                    key: _timerKey,
-                    totalSeconds: widget.settings.secondsPerRound,
-                    onTimeUp: _handleTimeUp,
-                    onTick: _handleCountdownTick,
-                  ),
-          ),
-        ],
-      ),
-      body: SafeArea(
-        child: Stack(
+    return PopScope<Object?>(
+      canPop: false,
+      onPopInvokedWithResult: (bool didPop, Object? result) async {
+        if (didPop) return;
+        await _handleBackTap();
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        appBar: _MatchdayGameAppBar(
+          currentRound: _currentRound + 1,
+          totalRounds: _places!.length,
+          submitted: _submitted,
+          timer: _submitted
+              ? null
+              : CountdownTimerWidget(
+                  key: _timerKey,
+                  totalSeconds: widget.settings.secondsPerRound,
+                  onTimeUp: _handleTimeUp,
+                  onTick: _handleCountdownTick,
+                ),
+          onBack: _handleBackTap,
+        ),
+        body: Stack(
           children: [
             _buildMainContent(
               place: place,
@@ -410,46 +416,87 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     );
   }
 
+  Future<void> _handleBackTap() async {
+    final bool leave = await _confirmExit();
+    if (!leave) return;
+    if (!mounted) return;
+    Navigator.of(context).pop();
+  }
+
+  Future<bool> _confirmExit() async {
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext ctx) {
+        return AlertDialog(
+          title: const Text('離開遊戲？'),
+          content: const Text('目前進度尚未完成，離開後本場成績不會記錄。'),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('繼續遊戲'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(ctx).colorScheme.error,
+              ),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('離開'),
+            ),
+          ],
+        );
+      },
+    );
+    return ok ?? false;
+  }
+
   Widget _buildMainContent({
     required Place place,
     required bool hasGuess,
     required bool isLastRound,
   }) {
-    return Padding(
-      padding: const EdgeInsets.all(12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(
-            child: StreetViewPanel(
-              // 只用 round 當 key：
-              //   - 走路 → State 內 _ignoreNextExternalChange=true，不 reload
-              //   - 自動重抽 / 換回合 → didUpdateWidget 看到 place 變且旗標未設 → reload
-              key: ValueKey<int>(_currentRound),
-              place: place,
-              mode: widget.settings.mode,
-              // No Move / Picture 模式不會在街景中走動，所以不需要 onPlaceChanged。
-              onPlaceChanged: widget.settings.mode == GameMode.move
-                  ? _handleStreetViewPlaceChanged
-                  : null,
-              onNeedsRepick: _handleStreetViewNeedsRepick,
-              // 把「打開地圖選位置」整合進街景右上角的 icon
-              onOpenMap: _submitted ? null : _openMap,
-              hasGuess: hasGuess,
-              maxMoveSteps: widget.settings.maxMoveSteps,
+    // 浮動送出按鈕高度 (52) + 底部安全區 bottom padding (~34 on notched iPhones)
+    //   + 額外 16 留白 + google 版權字高度 ~20
+    // 抓個簡單保守值：72px 作為「街景控制項要往上躲多少」
+    final double bottomSafe = MediaQuery.of(context).padding.bottom;
+    final double streetViewBottomInset = 52 + 16 + bottomSafe + 4;
+
+    return Stack(
+      children: <Widget>[
+        Positioned.fill(
+          child: StreetViewPanel(
+            // 只用 round 當 key：
+            //   - 走路 → State 內 _ignoreNextExternalChange=true，不 reload
+            //   - 自動重抽 / 換回合 → didUpdateWidget 看到 place 變且旗標未設 → reload
+            key: ValueKey<int>(_currentRound),
+            place: place,
+            mode: widget.settings.mode,
+            // No Move / Picture 模式不會在街景中走動，所以不需要 onPlaceChanged。
+            onPlaceChanged: widget.settings.mode == GameMode.move
+                ? _handleStreetViewPlaceChanged
+                : null,
+            onNeedsRepick: _handleStreetViewNeedsRepick,
+            // 把「打開地圖選位置」整合進街景右上角的 icon
+            onOpenMap: _submitted ? null : _openMap,
+            hasGuess: hasGuess,
+            maxMoveSteps: widget.settings.maxMoveSteps,
+            bottomInset: streetViewBottomInset,
+          ),
+        ),
+        Positioned(
+          left: 16,
+          right: 16,
+          bottom: 16,
+          child: SafeArea(
+            top: false,
+            child: _FloatingSubmitButton(
+              enabled: hasGuess && !_submitted,
+              label: hasGuess ? '送出答案' : '請先在地圖上選位置',
+              onTap: hasGuess && !_submitted ? () => _submitGuess() : null,
             ),
           ),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: 48,
-            child: ElevatedButton.icon(
-              onPressed: hasGuess && !_submitted ? () => _submitGuess() : null,
-              icon: const Icon(Icons.check),
-              label: Text(hasGuess ? '送出答案' : '請先在地圖上選位置'),
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -499,6 +546,213 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
 }
 
 // =============================================================================
+// 編輯風 AppBar：黑底 + LIVE 點 + 回合指示 + 右側計時膠囊
+// =============================================================================
+class _MatchdayGameAppBar extends StatelessWidget
+    implements PreferredSizeWidget {
+  final int currentRound;
+  final int totalRounds;
+  final bool submitted;
+  final Widget? timer;
+  final VoidCallback onBack;
+
+  const _MatchdayGameAppBar({
+    required this.currentRound,
+    required this.totalRounds,
+    required this.submitted,
+    required this.timer,
+    required this.onBack,
+  });
+
+  static const Color _ink = Color(0xFF101014);
+  static const Color _accent = Color(0xFFFF3D57);
+
+  @override
+  Size get preferredSize => const Size.fromHeight(64);
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: _ink,
+      elevation: 0,
+      child: SafeArea(
+        bottom: false,
+        child: SizedBox(
+          height: 64,
+          child: Row(
+            children: <Widget>[
+              // 左側：自訂返回鈕
+              Padding(
+                padding: const EdgeInsets.only(left: 4),
+                child: IconButton(
+                  tooltip: '退出遊戲',
+                  icon: const Icon(Icons.arrow_back, color: Colors.white),
+                  onPressed: onBack,
+                ),
+              ),
+              // 中央：LIVE 點 + ROUND n/N
+              Expanded(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: <Widget>[
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: const BoxDecoration(
+                        color: _accent,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'ROUND $currentRound / $totalRounds',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 2.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // 右側：計時膠囊 / 已提交標記
+              Padding(
+                padding: const EdgeInsets.only(right: 12),
+                child: submitted
+                    ? _SubmittedBadge()
+                    : _TimerPill(child: timer!),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TimerPill extends StatelessWidget {
+  final Widget child;
+  const _TimerPill({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white, width: 1),
+      ),
+      child: DefaultTextStyle.merge(
+        style: const TextStyle(
+          color: _MatchdayGameAppBar._ink,
+          fontWeight: FontWeight.w900,
+          fontSize: 13,
+          letterSpacing: 0.5,
+        ),
+        child: IconTheme.merge(
+          data: const IconThemeData(
+            color: _MatchdayGameAppBar._ink,
+            size: 16,
+          ),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+class _SubmittedBadge extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white12,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white24),
+      ),
+      child: const Text(
+        'SUBMITTED',
+        style: TextStyle(
+          color: Colors.white70,
+          fontWeight: FontWeight.w900,
+          fontSize: 11,
+          letterSpacing: 2,
+        ),
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// 浮動送出按鈕：街景全螢幕時疊在底部，毛玻璃感 + 陰影，保持可讀性
+// =============================================================================
+class _FloatingSubmitButton extends StatelessWidget {
+  final bool enabled;
+  final String label;
+  final VoidCallback? onTap;
+
+  const _FloatingSubmitButton({
+    required this.enabled,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final Color bg = enabled
+        ? Theme.of(context).colorScheme.primary
+        : Colors.black.withValues(alpha: 0.55);
+    return Material(
+      color: Colors.transparent,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        height: 52,
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: const <BoxShadow>[
+            BoxShadow(
+              color: Color(0x55000000),
+              blurRadius: 18,
+              offset: Offset(0, 6),
+            ),
+          ],
+        ),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(14),
+          child: Center(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: <Widget>[
+                Icon(
+                  enabled ? Icons.check : Icons.place_outlined,
+                  color: Colors.white,
+                  size: 20,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  label,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// =============================================================================
 // 全螢幕地圖疊加層
 // =============================================================================
 
@@ -531,95 +785,183 @@ class _MapOverlay extends StatelessWidget {
   Widget build(BuildContext context) {
     final ColorScheme cs = Theme.of(context).colorScheme;
     final bool hasGuess = guessed != null;
+    final double topSafe = MediaQuery.of(context).padding.top;
+    final double bottomSafe = MediaQuery.of(context).padding.bottom;
+
+    // 底部操作條高度估計（給地圖的縮放按鈕 bottomInset 用）
+    final double bottomBarHeight = submitted ? 120 : 110;
 
     return Positioned.fill(
       child: Material(
-        color: Theme.of(context).scaffoldBackgroundColor,
-        child: SafeArea(
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                child: Row(
-                  children: [
-                    if (!submitted)
-                      IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: onClose,
-                      )
-                    else
-                      const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
+        color: Colors.black,
+        child: Stack(
+          children: <Widget>[
+            // ---- 全螢幕地圖（邊到邊）
+            Positioned.fill(
+              child: GuessMap(
+                onGuessChanged: onGuessChanged,
+                onMapCreated: onMapCreated,
+                locked: submitted,
+                guessedLocation: guessed,
+                correctLocation: submitted ? place.latLng : null,
+                cornerRadius: 0,
+                bottomInset: bottomBarHeight + bottomSafe + 8,
+              ),
+            ),
+
+            // ---- 頂部狀態條（浮動在地圖上）
+            Positioned(
+              left: 12,
+              right: 12,
+              top: topSafe + 10,
+              child: _MapOverlayHeader(
+                submitted: submitted,
+                wasTimeUp: wasTimeUp,
+                hasGuess: hasGuess,
+                onClose: submitted ? null : onClose,
+              ),
+            ),
+
+            // ---- 底部：結算 strip / 提示 + 主按鈕
+            Positioned(
+              left: 12,
+              right: 12,
+              bottom: bottomSafe + 12,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  if (submitted && result != null)
+                    _ResultStrip(result: result!)
+                  else
+                    _GuessCoordPill(guessed: guessed),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    height: 52,
+                    child: FilledButton.icon(
+                      onPressed: submitted
+                          ? onNextRound
+                          : (hasGuess ? onClose : null),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: cs.primary,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        textStyle: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.2,
+                        ),
+                      ),
+                      icon: Icon(
                         submitted
-                            ? (wasTimeUp ? '時間到！' : '本回合結算')
-                            : '請點地圖選擇你的猜測',
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
+                            ? (isLastRound
+                                ? Icons.emoji_events
+                                : Icons.arrow_forward)
+                            : Icons.check,
+                      ),
+                      label: Text(
+                        submitted
+                            ? (isLastRound ? '查看總成績' : '下一回合')
+                            : (hasGuess ? '完成猜測' : '尚未選擇位置'),
                       ),
                     ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: GuessMap(
-                    onGuessChanged: onGuessChanged,
-                    onMapCreated: onMapCreated,
-                    locked: submitted,
-                    guessedLocation: guessed,
-                    correctLocation: submitted ? place.latLng : null,
                   ),
-                ),
+                ],
               ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    if (submitted && result != null)
-                      _ResultStrip(result: result!)
-                    else
-                      Text(
-                        hasGuess
-                            ? '猜測：'
-                                '${guessed!.latitude.toStringAsFixed(2)}°, '
-                                '${guessed!.longitude.toStringAsFixed(2)}°'
-                            : '尚未選擇位置',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(fontSize: 13),
-                      ),
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      height: 48,
-                      child: FilledButton.icon(
-                        onPressed: submitted ? onNextRound : onClose,
-                        style: FilledButton.styleFrom(
-                          backgroundColor: cs.primary,
-                        ),
-                        icon: Icon(
-                          submitted
-                              ? (isLastRound
-                                  ? Icons.emoji_events
-                                  : Icons.arrow_forward)
-                              : Icons.check,
-                        ),
-                        label: Text(
-                          submitted
-                              ? (isLastRound ? '查看總成績' : '下一回合')
-                              : (hasGuess ? '完成猜測' : '尚未選擇'),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
+      ),
+    );
+  }
+}
+
+/// 浮動頂部 header：半透明黑底 + 關閉鈕 + 標題。
+class _MapOverlayHeader extends StatelessWidget {
+  final bool submitted;
+  final bool wasTimeUp;
+  final bool hasGuess;
+  final VoidCallback? onClose;
+
+  const _MapOverlayHeader({
+    required this.submitted,
+    required this.wasTimeUp,
+    required this.hasGuess,
+    required this.onClose,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final String title = submitted
+        ? (wasTimeUp ? '時間到！' : '本回合結算')
+        : '請點地圖選擇你的猜測';
+    return Material(
+      color: Colors.black.withValues(alpha: 0.72),
+      borderRadius: BorderRadius.circular(14),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(8, 6, 14, 6),
+        child: Row(
+          children: <Widget>[
+            if (onClose != null)
+              IconButton(
+                tooltip: '返回街景',
+                icon: const Icon(Icons.close, color: Colors.white),
+                onPressed: onClose,
+              )
+            else
+              const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _GuessCoordPill extends StatelessWidget {
+  final LatLng? guessed;
+  const _GuessCoordPill({required this.guessed});
+
+  @override
+  Widget build(BuildContext context) {
+    final bool hasGuess = guessed != null;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.72),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: <Widget>[
+          Icon(
+            hasGuess ? Icons.place : Icons.touch_app,
+            size: 16,
+            color: Colors.white70,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            hasGuess
+                ? '${guessed!.latitude.toStringAsFixed(2)}°, '
+                    '${guessed!.longitude.toStringAsFixed(2)}°'
+                : '點地圖任一位置下注',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
       ),
     );
   }

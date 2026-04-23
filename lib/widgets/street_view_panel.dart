@@ -45,6 +45,10 @@ class StreetViewPanel extends StatefulWidget {
   /// Move 模式下可以走幾步。0 = 不限。
   final int maxMoveSteps;
 
+  /// 街景全螢幕化後，父層會在底部疊一顆浮動送出按鈕。
+  /// 這個 inset 會把「提示條 / 縮放按鈕」往上推，避免與浮動按鈕、Google 版權文字重疊。
+  final double bottomInset;
+
   const StreetViewPanel({
     super.key,
     required this.place,
@@ -55,6 +59,7 @@ class StreetViewPanel extends StatefulWidget {
     this.onOpenMap,
     this.hasGuess = false,
     this.maxMoveSteps = 0,
+    this.bottomInset = 0,
   });
 
   @override
@@ -450,7 +455,7 @@ class _StreetViewPanelState extends State<StreetViewPanel> {
 
         Positioned(
           left: 8,
-          bottom: 8,
+          bottom: 8 + widget.bottomInset,
           child: IgnorePointer(
             child: DecoratedBox(
               decoration: const BoxDecoration(
@@ -472,7 +477,7 @@ class _StreetViewPanelState extends State<StreetViewPanel> {
         if (widget.mode != GameMode.picture)
           Positioned(
             right: 10,
-            bottom: 16,
+            bottom: 16 + widget.bottomInset,
             child: _StreetViewZoomButtons(
               onZoomIn: _zoomIn,
               onZoomOut: _zoomOut,
@@ -501,19 +506,14 @@ class _StreetViewPanelState extends State<StreetViewPanel> {
       ],
     );
 
-    final Widget rounded = ClipRRect(
-      borderRadius: BorderRadius.circular(12),
-      child: content,
-    );
-
     if (widget.height != null) {
       return SizedBox(
         height: widget.height,
         width: double.infinity,
-        child: rounded,
+        child: content,
       );
     }
-    return rounded;
+    return content;
   }
 
   Widget _placeholder(String msg) {
