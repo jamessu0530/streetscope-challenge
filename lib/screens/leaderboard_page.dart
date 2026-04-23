@@ -677,10 +677,11 @@ class _MarqueeName extends StatefulWidget {
 
 class _MarqueeNameState extends State<_MarqueeName>
     with SingleTickerProviderStateMixin {
+  static const double _gap = 24;
   late final AnimationController _ctrl = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 2600),
-  )..repeat(reverse: true);
+    duration: const Duration(milliseconds: 3200),
+  )..repeat();
 
   @override
   void dispose() {
@@ -714,17 +715,33 @@ class _MarqueeNameState extends State<_MarqueeName>
           child: AnimatedBuilder(
             animation: _ctrl,
             builder: (BuildContext context, _) {
-              final double dx = -overflow * _ctrl.value;
+              final double loopWidth = textWidth + _gap;
+              final double dx = -loopWidth * _ctrl.value;
               return Transform.translate(
                 offset: Offset(dx, 0),
-                child: SizedBox(
-                  width: textWidth,
-                  child: Text(
-                    widget.text,
-                    maxLines: 1,
-                    softWrap: false,
-                    style: widget.style,
-                  ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    SizedBox(
+                      width: textWidth,
+                      child: Text(
+                        widget.text,
+                        maxLines: 1,
+                        softWrap: false,
+                        style: widget.style,
+                      ),
+                    ),
+                    const SizedBox(width: _gap),
+                    SizedBox(
+                      width: textWidth,
+                      child: Text(
+                        widget.text,
+                        maxLines: 1,
+                        softWrap: false,
+                        style: widget.style,
+                      ),
+                    ),
+                  ],
                 ),
               );
             },
