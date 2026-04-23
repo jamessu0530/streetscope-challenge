@@ -587,10 +587,8 @@ class _ScoreRow extends StatelessWidget {
               ),
               SizedBox(
                 width: 110,
-                child: Text(
-                  name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                child: _MarqueeName(
+                  text: name,
                   style: TextStyle(
                     color: textColor,
                     fontSize: 15,
@@ -662,6 +660,79 @@ class _ScoreRow extends StatelessWidget {
     return s.padLeft(6, '0');
   }
 
+}
+
+class _MarqueeName extends StatefulWidget {
+  final String text;
+  final TextStyle style;
+
+  const _MarqueeName({
+    required this.text,
+    required this.style,
+  });
+
+  @override
+  State<_MarqueeName> createState() => _MarqueeNameState();
+}
+
+class _MarqueeNameState extends State<_MarqueeName>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 2600),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final TextPainter painter = TextPainter(
+          text: TextSpan(text: widget.text, style: widget.style),
+          textDirection: TextDirection.ltr,
+          maxLines: 1,
+        )..layout();
+        final double textWidth = painter.width;
+        final double boxWidth = constraints.maxWidth;
+        final double overflow = textWidth - boxWidth;
+
+        if (overflow <= 0) {
+          return Text(
+            widget.text,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: widget.style,
+          );
+        }
+
+        return ClipRect(
+          child: AnimatedBuilder(
+            animation: _ctrl,
+            builder: (BuildContext context, _) {
+              final double dx = -overflow * _ctrl.value;
+              return Transform.translate(
+                offset: Offset(dx, 0),
+                child: SizedBox(
+                  width: textWidth,
+                  child: Text(
+                    widget.text,
+                    maxLines: 1,
+                    softWrap: false,
+                    style: widget.style,
+                  ),
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
 }
 
 // =============================================================================
