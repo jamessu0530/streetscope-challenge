@@ -717,28 +717,35 @@ class _MarqueeNameState extends State<_MarqueeName>
             builder: (BuildContext context, _) {
               final double loopWidth = textWidth + _gap;
               final double dx = -loopWidth * _ctrl.value;
-              return Transform.translate(
-                offset: Offset(dx, 0),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
+              return SizedBox(
+                height: painter.height,
+                child: Stack(
+                  clipBehavior: Clip.none,
                   children: <Widget>[
-                    SizedBox(
-                      width: textWidth,
-                      child: Text(
-                        widget.text,
-                        maxLines: 1,
-                        softWrap: false,
-                        style: widget.style,
+                    Positioned(
+                      left: dx,
+                      top: 0,
+                      child: SizedBox(
+                        width: textWidth,
+                        child: Text(
+                          widget.text,
+                          maxLines: 1,
+                          softWrap: false,
+                          style: widget.style,
+                        ),
                       ),
                     ),
-                    const SizedBox(width: _gap),
-                    SizedBox(
-                      width: textWidth,
-                      child: Text(
-                        widget.text,
-                        maxLines: 1,
-                        softWrap: false,
-                        style: widget.style,
+                    Positioned(
+                      left: dx + loopWidth,
+                      top: 0,
+                      child: SizedBox(
+                        width: textWidth,
+                        child: Text(
+                          widget.text,
+                          maxLines: 1,
+                          softWrap: false,
+                          style: widget.style,
+                        ),
                       ),
                     ),
                   ],
