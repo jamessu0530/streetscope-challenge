@@ -428,7 +428,7 @@ class _EmptyState extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             const Text(
-              '遊戲中本回合分數低於 1000 時會觸發懲罰，\n同時把 meme 收進這裡。',
+              '遊戲中本回合分數為 0 分時會觸發懲罰，\n同時把 meme 收進這裡。',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 12,

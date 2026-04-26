@@ -1,7 +1,7 @@
 // =============================================================================
 // meme_service
 //
-// 懲罰用 meme 抓取：當玩家本回合分數 < 1000，去 Reddit 抓一個跟
+// 懲罰用 meme 抓取：當玩家本回合分數 = 0，去 Reddit 抓一個跟
 // 目標國家相關的 meme 回來嘲諷玩家。
 //
 // 設計原則：
@@ -23,8 +23,8 @@ import 'package:http/http.dart' as http;
 
 import '../models/meme_result.dart';
 
-/// 分數門檻：低於此分數才觸發。
-const int kMemePunishmentScoreThreshold = 1000;
+/// 分數門檻：低於此分數才觸發（=0 分時觸發）。
+const int kMemePunishmentScoreThreshold = 1;
 
 /// 一律帶上禮貌的 User-Agent；Reddit 對無 UA 的請求會 429 / 403。
 const String _kRedditUserAgent =
