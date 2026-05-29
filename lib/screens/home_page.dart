@@ -17,11 +17,15 @@
 import 'package:flutter/material.dart';
 
 import '../data/game_constants.dart';
+import '../models/auth_user.dart';
 import '../models/game_region.dart';
 import '../models/game_settings.dart';
 import '../services/audio_service.dart';
+import '../services/auth_service.dart';
 import '../widgets/floating_home_nav_bar.dart';
 import '../widgets/matchday_ui.dart';
+import 'change_password_page.dart';
+import 'login_page.dart';
 import 'mode_selection_page.dart';
 
 class HomePage extends StatefulWidget {
@@ -108,6 +112,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             ),
           ),
           const FloatingHomeNavBar(current: HomeTab.home),
+          // LOG IN 入口浮在右上角，但要避免蓋到 ticker 的 trailing 文字。
+          // 用 MediaQuery 把按鈕擺到 ticker 下方一點點的位置。
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 44,
+            right: 12,
+            child: const _AuthEntryPill(),
+          ),
         ],
       ),
     );
@@ -689,6 +700,256 @@ class _ContinueCta extends StatelessWidget {
                 ],
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// 右上角登入入口：未登入 → LOG IN 膠囊；已登入 → 頭像 + 名字（點開 = 登出選單）
+// =============================================================================
+class _AuthEntryPill extends StatelessWidget {
+  const _AuthEntryPill();
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<AuthUser?>(
+      valueListenable: AuthService.instance.currentUser,
+      builder: (BuildContext context, AuthUser? user, _) {
+        return user == null
+            ? const _LoggedOutPill()
+            : _LoggedInPill(user: user);
+      },
+    );
+  }
+}
+
+class _LoggedOutPill extends StatelessWidget {
+  const _LoggedOutPill();
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: MatchdayPalette.ink,
+      shape: const StadiumBorder(),
+      elevation: 0,
+      child: InkWell(
+        customBorder: const StadiumBorder(),
+        onTap: () {
+          AudioService.instance.playClick();
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (BuildContext _) => const LoginPage(),
+            ),
+          );
+        },
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 14, 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: const <Widget>[
+              Icon(Icons.login, color: Colors.white, size: 16),
+              SizedBox(width: 6),
+              Text(
+                'LOG IN',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 12,
+                  letterSpacing: 2,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LoggedInPill extends StatelessWidget {
+  final AuthUser user;
+  const _LoggedInPill({required this.user});
+
+  String get _initial =>
+      user.displayName.trim().isEmpty ? '?' : user.displayName.trim()[0].toUpperCase();
+
+  Color get _avatarColor {
+    switch (user.provider) {
+      case AuthProvider.google:
+        return const Color(0xFF4285F4);
+      case AuthProvider.facebook:
+        return const Color(0xFF1877F2);
+      case AuthProvider.email:
+        return MatchdayPalette.ink;
+    }
+  }
+
+  Future<void> _showMenu(BuildContext context) async {
+    AudioService.instance.playClick();
+    final RenderBox button = context.findRenderObject() as RenderBox;
+    final RenderBox overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox;
+    final Offset topRight =
+        button.localToGlobal(Offset(button.size.width, button.size.height),
+            ancestor: overlay);
+    final Offset bottomRight = button.localToGlobal(
+        Offset(button.size.width, button.size.height),
+        ancestor: overlay);
+    final RelativeRect position = RelativeRect.fromLTRB(
+      topRight.dx - 200,
+      topRight.dy + 6,
+      overlay.size.width - bottomRight.dx,
+      0,
+    );
+    final String? choice = await showMenu<String>(
+      context: context,
+      position: position,
+      items: <PopupMenuEntry<String>>[
+        PopupMenuItem<String>(
+          enabled: false,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                user.displayName,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w900,
+                  color: MatchdayPalette.ink,
+                ),
+              ),
+              if ((user.email ?? '').isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    user.email!,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: Colors.black54,
+                    ),
+                  ),
+                ),
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  '已用 ${user.provider.label} 登入',
+                  style: const TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.5,
+                    color: Colors.black45,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const PopupMenuDivider(),
+        if (user.provider == AuthProvider.email &&
+            AuthService.instance.accessToken != null)
+          const PopupMenuItem<String>(
+            value: 'password',
+            child: Row(
+              children: <Widget>[
+                Icon(Icons.lock_outline, size: 16, color: MatchdayPalette.ink),
+                SizedBox(width: 8),
+                Text(
+                  '更改密碼',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    color: MatchdayPalette.ink,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        const PopupMenuItem<String>(
+          value: 'logout',
+          child: Row(
+            children: <Widget>[
+              Icon(Icons.logout, size: 16, color: MatchdayPalette.ink),
+              SizedBox(width: 8),
+              Text(
+                '登出',
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  color: MatchdayPalette.ink,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+    if (choice == 'password' && context.mounted) {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (BuildContext _) => const ChangePasswordPage(),
+        ),
+      );
+    }
+    if (choice == 'logout') {
+      await AuthService.instance.signOut();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      shape: StadiumBorder(
+        side: BorderSide(color: MatchdayPalette.ink, width: 1.5),
+      ),
+      child: InkWell(
+        customBorder: const StadiumBorder(),
+        onTap: () => _showMenu(context),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(4, 4, 12, 4),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Container(
+                width: 28,
+                height: 28,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: _avatarColor,
+                  shape: BoxShape.circle,
+                ),
+                child: Text(
+                  _initial,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 110),
+                child: Text(
+                  user.displayName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: MatchdayPalette.ink,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              const Icon(
+                Icons.expand_more,
+                size: 16,
+                color: MatchdayPalette.ink,
+              ),
+            ],
           ),
         ),
       ),

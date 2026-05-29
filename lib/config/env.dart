@@ -12,3 +12,45 @@ String get kGoogleApiKey {
 }
 
 bool get hasGoogleApiKey => kGoogleApiKey.isNotEmpty;
+
+/// 後端 API 根網址（登入、排行榜等）。未設定時為空。
+String get kApiBaseUrl =>
+    dotenv.maybeGet('API_BASE_URL')?.trim() ??
+    const String.fromEnvironment('API_BASE_URL', defaultValue: '').trim();
+
+bool get hasApiBaseUrl => kApiBaseUrl.isNotEmpty;
+
+/// Google OAuth Web Client ID（後端驗 idToken、Flutter serverClientId）。
+String get kGoogleWebClientId {
+  final String fromDotEnv =
+      dotenv.maybeGet('GOOGLE_WEB_CLIENT_ID')?.trim() ?? '';
+  if (fromDotEnv.isNotEmpty) return fromDotEnv;
+  return const String.fromEnvironment('GOOGLE_WEB_CLIENT_ID', defaultValue: '')
+      .trim();
+}
+
+/// Google OAuth iOS Client ID（僅 iOS 原生登入流程）。
+String get kGoogleIosClientId {
+  final String fromDotEnv =
+      dotenv.maybeGet('GOOGLE_IOS_CLIENT_ID')?.trim() ?? '';
+  if (fromDotEnv.isNotEmpty) return fromDotEnv;
+  return const String.fromEnvironment('GOOGLE_IOS_CLIENT_ID', defaultValue: '')
+      .trim();
+}
+
+bool get hasGoogleOAuth => kGoogleIosClientId.isNotEmpty;
+
+String get kFacebookAppId {
+  final String fromDotEnv =
+      dotenv.maybeGet('FACEBOOK_APP_ID')?.trim() ?? '';
+  if (fromDotEnv.isNotEmpty) return fromDotEnv;
+  return const String.fromEnvironment('FACEBOOK_APP_ID', defaultValue: '')
+      .trim();
+}
+
+bool get hasFacebookAppId => kFacebookAppId.isNotEmpty;
+
+/// MongoDB 連線字串 — 僅供未來後端或本機腳本參考；Flutter UI 不應直連資料庫。
+String get kMongoDbUri =>
+    dotenv.maybeGet('MONGODB_URI')?.trim() ??
+    const String.fromEnvironment('MONGODB_URI', defaultValue: '').trim();

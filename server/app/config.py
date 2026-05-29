@@ -1,0 +1,29 @@
+from pathlib import Path
+
+from dotenv import load_dotenv
+import os
+
+# 讀專案根目錄的 .env（與 Flutter 共用）
+_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(_ROOT / ".env")
+
+MONGODB_URI: str = os.getenv("MONGODB_URI", "").strip()
+JWT_SECRET: str = os.getenv("JWT_SECRET", "change-me-in-env").strip()
+JWT_ALGORITHM: str = "HS256"
+JWT_EXPIRE_DAYS: int = 30
+PORT: int = int(os.getenv("PORT", "3000"))
+# 教育版：忘記密碼 API 會回傳重設碼給 App 顯示（正式環境應改寄 Email 且設 false）
+PASSWORD_RESET_EXPOSE_TOKEN: bool = os.getenv(
+    "PASSWORD_RESET_EXPOSE_TOKEN", "true"
+).strip().lower() in ("1", "true", "yes")
+PASSWORD_RESET_EXPIRE_MINUTES: int = int(
+    os.getenv("PASSWORD_RESET_EXPIRE_MINUTES", "60")
+)
+# Google OAuth — 驗證 idToken（有 Web 用 Web；否則用 iOS Client ID）
+GOOGLE_WEB_CLIENT_ID: str = os.getenv("GOOGLE_WEB_CLIENT_ID", "").strip()
+GOOGLE_IOS_CLIENT_ID: str = os.getenv("GOOGLE_IOS_CLIENT_ID", "").strip()
+FACEBOOK_APP_ID: str = os.getenv("FACEBOOK_APP_ID", "").strip()
+# 教育版：Limited Login JWT 簽章驗證失敗時，改檢查 aud/exp/sub（勿用於正式環境）
+FACEBOOK_LIMITED_LOGIN_RELAXED: bool = os.getenv(
+    "FACEBOOK_LIMITED_LOGIN_RELAXED", "true"
+).strip().lower() in ("1", "true", "yes")
