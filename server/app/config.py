@@ -27,3 +27,10 @@ FACEBOOK_APP_ID: str = os.getenv("FACEBOOK_APP_ID", "").strip()
 FACEBOOK_LIMITED_LOGIN_RELAXED: bool = os.getenv(
     "FACEBOOK_LIMITED_LOGIN_RELAXED", "true"
 ).strip().lower() in ("1", "true", "yes")
+
+# AI 對戰 — 抓 Street View Static 圖（須啟用 Street View Static API；
+# 若這把 key 在 Google Cloud 限制成只給 iOS app，後端抓圖會失敗，需放寬或另開一把）
+GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY", "").strip()
+# Gemini（Google AI Studio）— 看圖猜經緯度
+GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "").strip()
+GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()

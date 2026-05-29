@@ -22,6 +22,7 @@ import '../models/game_settings.dart';
 import '../models/guess_result.dart';
 import '../models/meme_result.dart';
 import '../models/place.dart';
+import '../services/ai_opponent_service.dart';
 import '../services/audio_service.dart';
 import '../services/country_lookup_service.dart';
 import '../services/meme_collection_service.dart';
@@ -69,6 +70,18 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   PunishmentMemeOutcome? _memeOutcome;
   int _memeRequestSeq = 0;
 
+  /// AI 對戰：每回合的 AI 猜測（key = round）。
+  /// - 不在 _aiResolved 內 = 還在思考
+  /// - 在 _aiResolved 但 value 為 null = 該回合 AI 放棄（失敗）
+  final Map<int, AiOpponentGuess?> _aiGuessByRound = <int, AiOpponentGuess?>{};
+  final Set<int> _aiResolved = <int>{};
+  // 每回合一個 token，避免 repick 後舊的非同步結果覆蓋新的。
+  final Map<int, int> _aiToken = <int, int>{};
+
+  /// move 模式：玩家本回合沿路經過的地點（依序，含起點），
+  /// 送出時整段交給 AI 判斷，而非只看終點。
+  final List<Place> _moveTrail = <Place>[];
+
   GoogleMapController? _mapController;
 
   /// 倒數 widget 的最新回呼值，用來決定什麼時候該播 tick。
@@ -111,10 +124,106 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
       );
       if (!mounted) return;
       setState(() => _places = picked);
+      _resetMoveTrailForRound(_currentRound);
+      _kickAiForRound(_currentRound);
     } catch (e) {
       if (!mounted) return;
       setState(() => _loadError = '$e');
     }
+  }
+
+  /// move 模式：重置沿路足跡，並以起點 pano 當第一個點。
+  void _resetMoveTrailForRound(int round) {
+    _moveTrail.clear();
+    final List<Place>? places = _places;
+    if (places == null || round >= places.length) return;
+    final Place start = places[round];
+    if (start.panoId != null && start.panoId!.isNotEmpty) {
+      _moveTrail.add(start);
+    }
+  }
+
+  /// 回合開始就背景讓 AI 看街景圖猜（picture / noMove）。
+  /// move 模式因玩家會走動，改在送出時用「整段沿路足跡」算。
+  void _kickAiForRound(int round) {
+    if (!widget.settings.vsAi) return;
+    if (widget.settings.mode == GameMode.move) return;
+    final List<Place>? places = _places;
+    if (places == null || round >= places.length) return;
+
+    final int token = (_aiToken[round] ?? 0) + 1;
+    _aiToken[round] = token;
+    setState(() {
+      _aiResolved.remove(round);
+      _aiGuessByRound.remove(round);
+    });
+    _runAiGuess(round, token, places[round]);
+  }
+
+  /// move 模式：玩家送出後，用「整段沿路足跡」讓 AI 判斷
+  /// （而非只看終點）。trail 為本回合經過的地點序列。
+  void _kickAiForMoveSubmit(int round, Place finalPlace, List<Place> trail) {
+    if (!widget.settings.vsAi) return;
+    if (widget.settings.mode != GameMode.move) return;
+
+    final int token = (_aiToken[round] ?? 0) + 1;
+    _aiToken[round] = token;
+    setState(() {
+      _aiResolved.remove(round);
+      _aiGuessByRound.remove(round);
+    });
+    _runAiGuess(round, token, finalPlace, trail: trail);
+  }
+
+  Future<void> _runAiGuess(
+    int round,
+    int token,
+    Place place, {
+    List<Place>? trail,
+  }) async {
+    final AiOpponentGuess? guess = await AiOpponentService.instance.guess(
+      place: place,
+      mode: widget.settings.mode,
+      strength: widget.settings.aiStrength,
+      trail: trail,
+    );
+    if (!mounted) return;
+    // repick / 換回合後 token 變了 → 丟棄這個過時結果
+    if (_aiToken[round] != token) return;
+    setState(() {
+      _aiGuessByRound[round] = guess;
+      _aiResolved.add(round);
+    });
+  }
+
+  /// 把 AI 的原始猜測換算成與玩家同尺的 GuessResult（用本回合正確地點）。
+  GuessResult? _aiResultForRound(int round) {
+    final AiOpponentGuess? g = _aiGuessByRound[round];
+    final List<Place>? places = _places;
+    if (g == null || places == null || round >= places.length) return null;
+    return GuessResult.fromGuess(
+      correctPlace: places[round],
+      guessed: g.location,
+    );
+  }
+
+  /// AI 是否還在算本回合（vsAi 且尚未 resolved）。
+  /// move 模式在送出後才開算，所以一樣用 _aiResolved 判斷即可。
+  bool _aiIsThinking(int round) {
+    if (!widget.settings.vsAi) return false;
+    return !_aiResolved.contains(round);
+  }
+
+  /// 給結算頁用：每回合對應一筆 AI GuessResult（沒猜到記 0 分）。
+  List<GuessResult>? _aiResultsForGame() {
+    if (!widget.settings.vsAi) return null;
+    final List<Place>? places = _places;
+    if (places == null) return null;
+    return List<GuessResult>.generate(places.length, (int i) {
+      final AiOpponentGuess? g = _aiGuessByRound[i];
+      if (g == null) return GuessResult.noAnswer(places[i]);
+      return GuessResult.fromGuess(correctPlace: places[i], guessed: g.location);
+    });
   }
 
   void _handleGuessChanged(LatLng position) {
@@ -130,6 +239,13 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     setState(() {
       places[_currentRound] = newPlace;
     });
+    // 記錄玩家沿路經過的 pano（去除連續重複），送出時給 AI 看整段路線。
+    final String? pid = newPlace.panoId;
+    if (pid != null && pid.isNotEmpty) {
+      if (_moveTrail.isEmpty || _moveTrail.last.panoId != pid) {
+        _moveTrail.add(newPlace);
+      }
+    }
   }
 
   bool _repicking = false;
@@ -154,6 +270,9 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         _timerKey = UniqueKey();
         _guessedLocation = null;
       });
+      // 地點換了 → 足跡重置、AI 也要對新地點重算。
+      _resetMoveTrailForRound(_currentRound);
+      _kickAiForRound(_currentRound);
     } catch (_) {
       // 抽不到就放棄重抽，讓玩家用原本那張。
     } finally {
@@ -186,6 +305,22 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
 
     // 送出就停 BGM；等下一題再視倒數重新啟動
     AudioService.instance.stopGameBgm();
+
+    // move 模式：用玩家「整段沿路足跡」讓 AI 判斷（picture / noMove 已在回合開始算）。
+    if (widget.settings.vsAi && widget.settings.mode == GameMode.move) {
+      // 確保終點也在足跡內（玩家可能沒觸發 onPlaceChanged 就送出）。
+      final String? pid = _currentPlace.panoId;
+      if (pid != null &&
+          pid.isNotEmpty &&
+          (_moveTrail.isEmpty || _moveTrail.last.panoId != pid)) {
+        _moveTrail.add(_currentPlace);
+      }
+      _kickAiForMoveSubmit(
+        _currentRound,
+        _currentPlace,
+        List<Place>.from(_moveTrail),
+      );
+    }
 
     // 低分懲罰：本回合 <1000 分 → 背景抓 meme 後疊加顯示。
     // 不 await，不阻塞主流程；抓到再更新狀態。
@@ -319,6 +454,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
           builder: (BuildContext context) => ResultPage(
             results: _results,
             settings: widget.settings,
+            aiResults: _aiResultsForGame(),
           ),
         ),
       );
@@ -341,6 +477,9 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     });
     // 下一題一開始先靜音；要等倒數再度 ≤ 30 秒才播。
     AudioService.instance.stopGameBgm();
+    // 新回合 → 足跡重置、背景啟動 AI 猜測（picture / noMove）。
+    _resetMoveTrailForRound(_currentRound);
+    _kickAiForRound(_currentRound);
   }
 
   @override
@@ -391,6 +530,11 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
                 isLastRound: isLastRound,
                 wasTimeUp: _roundSummaryWasTimeUp,
                 result: _submitted ? summaryResult : null,
+                vsAi: widget.settings.vsAi,
+                aiThinking: _aiIsThinking(_currentRound),
+                aiResult: _aiResultForRound(_currentRound),
+                aiReasoning: _aiGuessByRound[_currentRound]?.reasoning,
+                aiConfidence: _aiGuessByRound[_currentRound]?.confidence,
                 onMapCreated: (GoogleMapController c) {
                   _mapController = c;
                   if (_submitted) {
@@ -763,6 +907,11 @@ class _MapOverlay extends StatelessWidget {
   final bool isLastRound;
   final bool wasTimeUp;
   final GuessResult? result;
+  final bool vsAi;
+  final bool aiThinking;
+  final GuessResult? aiResult;
+  final String? aiReasoning;
+  final double? aiConfidence;
   final ValueChanged<GoogleMapController> onMapCreated;
   final ValueChanged<LatLng> onGuessChanged;
   final VoidCallback onClose;
@@ -775,6 +924,11 @@ class _MapOverlay extends StatelessWidget {
     required this.isLastRound,
     required this.wasTimeUp,
     required this.result,
+    required this.vsAi,
+    required this.aiThinking,
+    required this.aiResult,
+    required this.aiReasoning,
+    required this.aiConfidence,
     required this.onMapCreated,
     required this.onGuessChanged,
     required this.onClose,
@@ -789,7 +943,8 @@ class _MapOverlay extends StatelessWidget {
     final double bottomSafe = MediaQuery.of(context).padding.bottom;
 
     // 底部操作條高度估計（給地圖的縮放按鈕 bottomInset 用）
-    final double bottomBarHeight = submitted ? 120 : 110;
+    final double bottomBarHeight =
+        submitted ? (vsAi ? 210 : 120) : 110;
 
     return Positioned.fill(
       child: Material(
@@ -804,6 +959,7 @@ class _MapOverlay extends StatelessWidget {
                 locked: submitted,
                 guessedLocation: guessed,
                 correctLocation: submitted ? place.latLng : null,
+                aiLocation: submitted ? aiResult?.guessed : null,
                 cornerRadius: 0,
                 bottomInset: bottomBarHeight + bottomSafe + 8,
               ),
@@ -834,6 +990,16 @@ class _MapOverlay extends StatelessWidget {
                     _ResultStrip(result: result!)
                   else
                     _GuessCoordPill(guessed: guessed),
+                  if (submitted && vsAi) ...<Widget>[
+                    const SizedBox(height: 8),
+                    _AiVersusStrip(
+                      thinking: aiThinking,
+                      aiResult: aiResult,
+                      playerScore: result?.score ?? 0,
+                      reasoning: aiReasoning,
+                      confidence: aiConfidence,
+                    ),
+                  ],
                   const SizedBox(height: 10),
                   SizedBox(
                     height: 52,
@@ -962,6 +1128,354 @@ class _GuessCoordPill extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// AI 對戰：送出後顯示 AI 的距離 / 分數，與本回合勝負。
+/// 有 reasoning 時整塊可點 → 開底部面板看 AI 完整判斷。
+class _AiVersusStrip extends StatelessWidget {
+  final bool thinking;
+  final GuessResult? aiResult;
+  final int playerScore;
+  final String? reasoning;
+  final double? confidence;
+
+  const _AiVersusStrip({
+    required this.thinking,
+    required this.aiResult,
+    required this.playerScore,
+    required this.reasoning,
+    required this.confidence,
+  });
+
+  static const Color _aiColor = Color(0xFFFF7A1A);
+
+  bool get _hasReasoning => reasoning != null && reasoning!.trim().isNotEmpty;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool tappable = !thinking && _hasReasoning;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: tappable ? () => _openDetail(context) : null,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.78),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: _aiColor.withValues(alpha: 0.7)),
+          ),
+          child: thinking
+              ? const Row(
+                  children: <Widget>[
+                    SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(_aiColor),
+                      ),
+                    ),
+                    SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'AI 正在分析街景…',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                )
+              : _buildResolved(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildResolved() {
+    final GuessResult? ai = aiResult;
+    if (ai == null) {
+      return const Row(
+        children: <Widget>[
+          Icon(Icons.smart_toy_outlined, size: 16, color: _aiColor),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'AI 放棄這題（0 分）',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    final int aiScore = ai.score;
+    final String distanceText = ai.distanceKm == null
+        ? '—'
+        : (ai.distanceKm! < 1
+            ? '<1 km'
+            : '${ai.distanceKm!.toStringAsFixed(1)} km');
+
+    final String verdict;
+    final Color verdictColor;
+    if (playerScore > aiScore) {
+      verdict = '你領先';
+      verdictColor = const Color(0xFF4CD964);
+    } else if (playerScore < aiScore) {
+      verdict = 'AI 領先';
+      verdictColor = _aiColor;
+    } else {
+      verdict = '平手';
+      verdictColor = Colors.white70;
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            const Icon(Icons.smart_toy_outlined, size: 16, color: _aiColor),
+            const SizedBox(width: 8),
+            const Text(
+              'AI',
+              style: TextStyle(
+                color: _aiColor,
+                fontSize: 13,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 1,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                distanceText,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+            Text(
+              '$aiScore 分',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: verdictColor.withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: verdictColor.withValues(alpha: 0.8)),
+              ),
+              child: Text(
+                verdict,
+                style: TextStyle(
+                  color: verdictColor,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (_hasReasoning) ...<Widget>[
+          const SizedBox(height: 6),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  '「${reasoning!.trim()}」',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white60,
+                    fontSize: 11,
+                    fontStyle: FontStyle.italic,
+                    height: 1.3,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              const Padding(
+                padding: EdgeInsets.only(top: 1),
+                child: Icon(
+                  Icons.unfold_more,
+                  size: 14,
+                  color: _aiColor,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          const Text(
+            '點我看 AI 怎麼判斷',
+            style: TextStyle(
+              color: _aiColor,
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  void _openDetail(BuildContext context) {
+    final GuessResult? ai = aiResult;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF101014),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (BuildContext ctx) {
+        final double bottomSafe = MediaQuery.of(ctx).padding.bottom;
+        final String distanceText = ai?.distanceKm == null
+            ? '—'
+            : (ai!.distanceKm! < 1
+                ? '<1 公里'
+                : '${ai.distanceKm!.toStringAsFixed(1)} 公里');
+        final String confText = confidence == null
+            ? '—'
+            : '${(confidence! * 100).round()}%';
+        return Padding(
+          padding: EdgeInsets.fromLTRB(20, 16, 20, 16 + bottomSafe),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Row(
+                children: <Widget>[
+                  Icon(Icons.smart_toy_outlined, color: _aiColor, size: 20),
+                  SizedBox(width: 8),
+                  Text(
+                    'AI 怎麼判斷',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: <Widget>[
+                  _DetailChip(label: '距離', value: distanceText),
+                  const SizedBox(width: 10),
+                  _DetailChip(label: '分數', value: '${ai?.score ?? 0}'),
+                  const SizedBox(width: 10),
+                  _DetailChip(label: '信心', value: confText),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Text(
+                reasoning!.trim(),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  height: 1.6,
+                ),
+              ),
+              const SizedBox(height: 18),
+              SizedBox(
+                height: 46,
+                child: FilledButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _aiColor,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    '了解',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// AI 詳情底部面板的小資訊膠囊（距離 / 分數 / 信心）。
+class _DetailChip extends StatelessWidget {
+  final String label;
+  final String value;
+  const _DetailChip({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white12),
+        ),
+        child: Column(
+          children: <Widget>[
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white54,
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.5,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              value,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

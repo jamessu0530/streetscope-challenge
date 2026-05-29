@@ -73,3 +73,44 @@ class AuthResponse(BaseModel):
     user: UserPublic
 
     model_config = {"populate_by_name": True}
+
+
+class AiGuessRequest(BaseModel):
+    pano_id: str | None = Field(
+        default=None,
+        alias="panoId",
+        description="Google Street View panorama id；測試 lat/lng 時請刪除此欄，勿填 Swagger 預設的 string",
+    )
+    lat: float | None = Field(default=None, examples=[25.0339639])
+    lng: float | None = Field(default=None, examples=[121.5644722])
+    # picture | noMove | move
+    mode: str = Field(default="picture", examples=["picture"])
+    # AI 強度：weak | medium | strong（picture 不受影響）
+    strength: str = Field(default="medium", examples=["medium"])
+    # picture 模式可帶玩家視角朝向（度）
+    heading: float | None = Field(default=None, examples=[0])
+    # move 模式：玩家沿路經過的 panorama id（依序），AI 會看整段路線而非只看終點
+    pano_trail: list[str] | None = Field(default=None, alias="panoTrail")
+
+    model_config = {
+        "populate_by_name": True,
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "lat": 25.0339639,
+                    "lng": 121.5644722,
+                    "mode": "picture",
+                    "heading": 0,
+                }
+            ]
+        },
+    }
+
+
+class AiGuessResponse(BaseModel):
+    lat: float
+    lng: float
+    confidence: float | None = None
+    reasoning: str | None = None
+
+    model_config = {"populate_by_name": True}

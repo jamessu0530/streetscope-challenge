@@ -16,6 +16,9 @@ class GuessMap extends StatefulWidget {
   final LatLng? guessedLocation;
   final LatLng? correctLocation;
 
+  /// AI 對手的猜測位置（送出後才會顯示）。
+  final LatLng? aiLocation;
+
   /// 外層圓角。全螢幕地圖 overlay 會傳 0 避免四角留白。
   final double cornerRadius;
 
@@ -29,6 +32,7 @@ class GuessMap extends StatefulWidget {
     this.locked = false,
     this.guessedLocation,
     this.correctLocation,
+    this.aiLocation,
     this.cornerRadius = 12,
     this.bottomInset = 16,
   });
@@ -100,6 +104,29 @@ class _GuessMapState extends State<GuessMap> {
           ),
         );
       }
+      // AI 的猜測 → 正確位置（橘色，與玩家的紅線區分）。
+      if (widget.aiLocation != null) {
+        polylines.add(
+          Polyline(
+            polylineId: const PolylineId('ai_to_correct'),
+            color: const Color(0xFFFF7A1A),
+            width: 3,
+            points: <LatLng>[widget.aiLocation!, widget.correctLocation!],
+          ),
+        );
+      }
+    }
+
+    if (widget.aiLocation != null) {
+      markers.add(
+        Marker(
+          markerId: const MarkerId('ai'),
+          position: widget.aiLocation!,
+          icon:
+              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
+          infoWindow: const InfoWindow(title: 'AI 的猜測'),
+        ),
+      );
     }
 
     return ClipRRect(

@@ -22,10 +22,14 @@ class ResultPage extends StatefulWidget {
   final List<GuessResult> results;
   final GameSettings settings;
 
+  /// AI 對戰時，每回合對應的 AI 結果（與 results 等長）；非對戰為 null。
+  final List<GuessResult>? aiResults;
+
   const ResultPage({
     super.key,
     required this.results,
     required this.settings,
+    this.aiResults,
   });
 
   @override
@@ -49,6 +53,14 @@ class _ResultPageState extends State<ResultPage>
       widget.results.fold<int>(0, (int sum, GuessResult r) => sum + r.score);
 
   int get _maxPossibleScore => widget.results.length * kMaxScore;
+
+  bool get _vsAi =>
+      widget.aiResults != null && widget.aiResults!.isNotEmpty;
+
+  int get _aiTotalScore =>
+      widget.aiResults
+          ?.fold<int>(0, (int sum, GuessResult r) => sum + r.score) ??
+      0;
 
   double get _averageScore {
     if (widget.results.isEmpty) return 0;
@@ -141,6 +153,10 @@ class _ResultPageState extends State<ResultPage>
                   _buildNameField(),
                   const SizedBox(height: 16),
                   _buildHeroNumber(),
+                  if (_vsAi) ...<Widget>[
+                    const SizedBox(height: 16),
+                    _buildVersusCard(),
+                  ],
                   const SizedBox(height: 20),
                   _buildChart(bestIdx: bestIdx),
                   const SizedBox(height: 10),
@@ -313,6 +329,139 @@ class _ResultPageState extends State<ResultPage>
               ),
             ),
           ],
+        ),
+      ],
+    );
+  }
+
+  // ---- YOU vs AI 比較卡 ---------------------------------------------------
+  Widget _buildVersusCard() {
+    final int you = _totalScore;
+    final int ai = _aiTotalScore;
+    final bool youWin = you > ai;
+    final bool tie = you == ai;
+    const Color aiColor = _accent; // 橘
+    const Color youColor = _ink;
+
+    final String verdict = tie
+        ? 'TIE'
+        : youWin
+            ? 'YOU WIN'
+            : 'AI WINS';
+    final Color verdictColor = tie
+        ? _ink2
+        : youWin
+            ? const Color(0xFF1FA463)
+            : aiColor;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _divider),
+      ),
+      child: Column(
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              const Text(
+                'YOU vs AI',
+                style: TextStyle(
+                  fontSize: 11,
+                  letterSpacing: 2,
+                  fontWeight: FontWeight.w800,
+                  color: _ink2,
+                ),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: verdictColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: verdictColor.withValues(alpha: 0.8)),
+                ),
+                child: Text(
+                  verdict,
+                  style: TextStyle(
+                    fontSize: 11,
+                    letterSpacing: 1,
+                    fontWeight: FontWeight.w900,
+                    color: verdictColor,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: _versusSide(
+                  label: 'YOU',
+                  score: you,
+                  color: youColor,
+                  highlight: youWin || tie,
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 8),
+                child: Text(
+                  'vs',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: _ink3,
+                  ),
+                ),
+              ),
+              Expanded(
+                child: _versusSide(
+                  label: 'GEMINI AI',
+                  score: ai,
+                  color: aiColor,
+                  highlight: !youWin && !tie,
+                  alignEnd: true,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _versusSide({
+    required String label,
+    required int score,
+    required Color color,
+    required bool highlight,
+    bool alignEnd = false,
+  }) {
+    return Column(
+      crossAxisAlignment:
+          alignEnd ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 10,
+            letterSpacing: 1.6,
+            fontWeight: FontWeight.w800,
+            color: highlight ? color : _ink3,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          '$score',
+          style: TextStyle(
+            fontSize: 30,
+            height: 1,
+            letterSpacing: -1,
+            fontWeight: FontWeight.w800,
+            color: highlight ? color : _ink3,
+          ),
         ),
       ],
     );
