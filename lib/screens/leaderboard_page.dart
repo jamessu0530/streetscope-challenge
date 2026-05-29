@@ -10,11 +10,16 @@ import 'package:flutter/services.dart';
 import '../models/game_mode.dart';
 import '../models/game_region.dart';
 import '../models/leaderboard_entry.dart';
+import '../services/auth_service.dart';
 import '../services/leaderboard_service.dart';
+import 'login_page.dart';
 import '../widgets/floating_home_nav_bar.dart';
 
 class LeaderboardPage extends StatefulWidget {
-  const LeaderboardPage({super.key});
+  /// 剛結束一局時傳入，用於高亮該筆雲端紀錄。
+  final String? highlightEntryId;
+
+  const LeaderboardPage({super.key, this.highlightEntryId});
 
   @override
   State<LeaderboardPage> createState() => _LeaderboardPageState();
@@ -25,8 +30,9 @@ enum _Tab { top, recent }
 class _LeaderboardPageState extends State<LeaderboardPage>
     with TickerProviderStateMixin {
   bool _loading = true;
+  String? _error;
   List<LeaderboardEntry> _all = <LeaderboardEntry>[];
-  DateTime? _currentPlayedAt;
+  String? _highlightEntryId;
   _Tab _tab = _Tab.top;
   GameMode? _modeFilter;
   GameRegion? _regionFilter;
@@ -70,20 +76,53 @@ class _LeaderboardPageState extends State<LeaderboardPage>
   }
 
   Future<void> _load() async {
-    final List<LeaderboardEntry> all = await LeaderboardService.instance.loadAll();
-    DateTime? currentPlayedAt;
-    for (final LeaderboardEntry e in all) {
-      if (currentPlayedAt == null || e.playedAt.isAfter(currentPlayedAt)) {
-        currentPlayedAt = e.playedAt;
-      }
+    if (!AuthService.instance.isLoggedIn) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = '請先登入才能查看雲端排行榜';
+        _all = <LeaderboardEntry>[];
+      });
+      return;
     }
-    if (!mounted) return;
-    setState(() {
-      _all = all;
-      _currentPlayedAt = currentPlayedAt;
-      _loading = false;
-    });
-    _countCtrl.forward(from: 0);
+
+    try {
+      final List<LeaderboardEntry> all =
+          await LeaderboardService.instance.loadAll(limit: 200);
+      String? highlightId = widget.highlightEntryId;
+      if (highlightId == null || highlightId.isEmpty) {
+        LeaderboardEntry? latestMe;
+        for (final LeaderboardEntry e in all) {
+          if (!e.isMe) continue;
+          if (latestMe == null || e.playedAt.isAfter(latestMe.playedAt)) {
+            latestMe = e;
+          }
+        }
+        highlightId = latestMe?.id;
+      }
+      if (!mounted) return;
+      setState(() {
+        _all = all;
+        _highlightEntryId = highlightId;
+        _error = null;
+        _loading = false;
+      });
+      _countCtrl.forward(from: 0);
+    } on LeaderboardException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.message;
+        _all = <LeaderboardEntry>[];
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = '載入失敗：$e';
+        _all = <LeaderboardEntry>[];
+        _loading = false;
+      });
+    }
   }
 
   List<LeaderboardEntry> get _rows {
@@ -409,6 +448,54 @@ class _LeaderboardPageState extends State<LeaderboardPage>
   }
 
   Widget _buildList() {
+    if (_error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Text(
+                _error!.toUpperCase(),
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: _dim,
+                  fontSize: 12,
+                  height: 1.8,
+                  letterSpacing: 2,
+                  fontFamily: 'Menlo',
+                  fontFamilyFallback: _monoFallback,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              if (!AuthService.instance.isLoggedIn) ...<Widget>[
+                const SizedBox(height: 16),
+                OutlinedButton(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (BuildContext _) => const LoginPage(),
+                      ),
+                    );
+                  },
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _accent,
+                    side: const BorderSide(color: _accent),
+                  ),
+                  child: const Text(
+                    '前往登入',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 2,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      );
+    }
     if (_rows.isEmpty) {
       return const Center(
         child: Padding(
@@ -435,9 +522,8 @@ class _LeaderboardPageState extends State<LeaderboardPage>
       itemCount: _rows.length,
       itemBuilder: (BuildContext context, int index) {
         final LeaderboardEntry e = _rows[index];
-        final bool isCurrent = _currentPlayedAt != null &&
-            e.playedAt.millisecondsSinceEpoch ==
-                _currentPlayedAt!.millisecondsSinceEpoch;
+        final bool isCurrent =
+            _highlightEntryId != null && e.id == _highlightEntryId;
         return _ScoreRow(
           index: index,
           entry: e,

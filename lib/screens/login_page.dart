@@ -1,8 +1,9 @@
 // =============================================================================
-// LoginPage — Email 接 FastAPI；Google / Facebook 仍為本機 mock。
+// LoginPage — Email / Google / Facebook / GitHub 接 FastAPI。
 // =============================================================================
 
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 import '../models/auth_user.dart';
 import '../services/audio_service.dart';
@@ -38,8 +39,9 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<void> _runSignIn(
     AuthProvider provider,
-    Future<AuthUser> Function() action,
-  ) async {
+    Future<AuthUser> Function() action, {
+    String Function(AuthUser user)? successMessage,
+  }) async {
     if (_busy != null) return;
     AudioService.instance.playClick();
     setState(() => _busy = provider);
@@ -48,11 +50,13 @@ class _LoginPageState extends State<LoginPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('歡迎，${user.displayName}'),
+          content: Text(
+            successMessage?.call(user) ?? '歡迎，${user.displayName}',
+          ),
           duration: const Duration(seconds: 2),
         ),
       );
-      Navigator.of(context).pop();
+      Navigator.of(context).pop(true);
     } on AuthException catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -82,6 +86,13 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
+  void _signInWithGitHub() {
+    _runSignIn(
+      AuthProvider.github,
+      () => AuthService.instance.signInWithGitHub(),
+    );
+  }
+
   void _submitEmail() {
     if (!(_formKey.currentState?.validate() ?? false)) return;
     final String email = _emailCtrl.text.trim();
@@ -95,6 +106,8 @@ class _LoginPageState extends State<LoginPage> {
           password: password,
           displayName: name,
         ),
+        successMessage: (AuthUser user) =>
+            '註冊成功，已為 ${user.displayName} 自動登入',
       );
     } else {
       _runSignIn(
@@ -128,6 +141,7 @@ class _LoginPageState extends State<LoginPage> {
                 busy: _busy,
                 onGoogle: _signInWithGoogle,
                 onFacebook: _signInWithFacebook,
+                onGitHub: _signInWithGitHub,
               ),
               const SizedBox(height: 22),
               const _OrDivider(),
@@ -234,7 +248,7 @@ class _Header extends StatelessWidget {
           const Padding(
             padding: EdgeInsets.symmetric(horizontal: 12),
             child: Text(
-              'Email / Google / Facebook 登入會寫入 MongoDB 雲端帳號。',
+              'Email / Google / Facebook / GitHub 登入會寫入 MongoDB 雲端帳號。',
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
@@ -253,11 +267,13 @@ class _SocialButtons extends StatelessWidget {
   final AuthProvider? busy;
   final VoidCallback onGoogle;
   final VoidCallback onFacebook;
+  final VoidCallback onGitHub;
 
   const _SocialButtons({
     required this.busy,
     required this.onGoogle,
     required this.onFacebook,
+    required this.onGitHub,
   });
 
   @override
@@ -268,9 +284,12 @@ class _SocialButtons extends StatelessWidget {
         children: <Widget>[
           _SocialPillButton(
             label: '使用 Google 登入',
-            icon: Icons.g_mobiledata_rounded,
+            iconChild: SvgPicture.asset(
+              'assets/images/google_logo.svg',
+              width: 22,
+              height: 22,
+            ),
             iconBg: Colors.white,
-            iconColor: const Color(0xFF4285F4),
             background: Colors.white,
             foreground: MatchdayPalette.ink,
             border: MatchdayPalette.ink,
@@ -291,6 +310,22 @@ class _SocialButtons extends StatelessWidget {
             disabled: busy != null && busy != AuthProvider.facebook,
             onTap: onFacebook,
           ),
+          const SizedBox(height: 12),
+          _SocialPillButton(
+            label: '使用 GitHub 登入',
+            iconChild: SvgPicture.asset(
+              'assets/images/github_logo.svg',
+              width: 22,
+              height: 22,
+            ),
+            iconBg: const Color(0xFF24292F),
+            background: const Color(0xFF24292F),
+            foreground: Colors.white,
+            border: const Color(0xFF24292F),
+            loading: busy == AuthProvider.github,
+            disabled: busy != null && busy != AuthProvider.github,
+            onTap: onGitHub,
+          ),
         ],
       ),
     );
@@ -299,9 +334,10 @@ class _SocialButtons extends StatelessWidget {
 
 class _SocialPillButton extends StatelessWidget {
   final String label;
-  final IconData icon;
+  final Widget? iconChild;
+  final IconData? icon;
   final Color iconBg;
-  final Color iconColor;
+  final Color? iconColor;
   final Color background;
   final Color foreground;
   final Color border;
@@ -311,16 +347,17 @@ class _SocialPillButton extends StatelessWidget {
 
   const _SocialPillButton({
     required this.label,
-    required this.icon,
+    this.iconChild,
+    this.icon,
     required this.iconBg,
-    required this.iconColor,
+    this.iconColor,
     required this.background,
     required this.foreground,
     required this.border,
     required this.loading,
     required this.disabled,
     required this.onTap,
-  });
+  }) : assert(iconChild != null || icon != null);
 
   @override
   Widget build(BuildContext context) {
@@ -348,7 +385,8 @@ class _SocialPillButton extends StatelessWidget {
                     color: iconBg,
                     shape: BoxShape.circle,
                   ),
-                  child: Icon(icon, color: iconColor, size: 22),
+                  child: iconChild ??
+                      Icon(icon, color: iconColor, size: 22),
                 ),
                 const SizedBox(width: 14),
                 Expanded(

@@ -12,6 +12,7 @@ enum AuthProvider {
   email,
   google,
   facebook,
+  github,
 }
 
 extension AuthProviderX on AuthProvider {
@@ -23,6 +24,8 @@ extension AuthProviderX on AuthProvider {
         return 'Google';
       case AuthProvider.facebook:
         return 'Facebook';
+      case AuthProvider.github:
+        return 'GitHub';
     }
   }
 }
@@ -71,10 +74,15 @@ class AuthUser {
   factory AuthUser.fromApiJson(Map<String, dynamic> json) {
     final String providerName =
         json['provider'] as String? ?? AuthProvider.email.name;
-    final String? createdAt = json['createdAt'] as String?;
+    final String? createdAt =
+        json['createdAt'] as String? ?? json['created_at'] as String?;
+    final String? displayName =
+        json['displayName'] as String? ?? json['display_name'] as String?;
     return AuthUser(
       id: (json['id'] as String?) ?? '',
-      displayName: (json['displayName'] as String?) ?? 'Player',
+      displayName: (displayName != null && displayName.trim().isNotEmpty)
+          ? displayName.trim()
+          : 'Player',
       email: json['email'] as String?,
       provider: AuthProvider.values.firstWhere(
         (AuthProvider p) => p.name == providerName,

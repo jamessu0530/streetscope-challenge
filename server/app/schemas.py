@@ -22,6 +22,12 @@ class GoogleSignInRequest(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class GitHubSignInRequest(BaseModel):
+    code: str = Field(min_length=4)
+
+    model_config = {"populate_by_name": True}
+
+
 class FacebookSignInRequest(BaseModel):
     login_type: str | None = Field(default=None, alias="loginType")
     access_token: str | None = Field(default=None, alias="accessToken")
@@ -71,6 +77,57 @@ class AuthResponse(BaseModel):
     access_token: str = Field(alias="accessToken")
     token_type: str = Field(default="bearer", alias="tokenType")
     user: UserPublic
+
+    model_config = {"populate_by_name": True}
+
+
+class LeaderboardSubmitRequest(BaseModel):
+    total_score: int = Field(ge=0, alias="totalScore")
+    rounds: int = Field(ge=1, alias="rounds")
+    seconds_per_round: int = Field(ge=1, alias="secondsPerRound")
+    mode: str
+    region: str
+
+    model_config = {"populate_by_name": True}
+
+
+class MemeAddRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=512)
+    image_url: str = Field(min_length=4, alias="imageUrl")
+    post_url: str = Field(default="", alias="postUrl")
+    subreddit: str = Field(default="")
+    ups: int = Field(default=0, ge=0)
+    country: str | None = None
+    score: int = Field(default=0, ge=0)
+
+    model_config = {"populate_by_name": True}
+
+
+class MemePublic(BaseModel):
+    id: str
+    title: str
+    image_url: str = Field(alias="imageUrl")
+    post_url: str = Field(alias="postUrl")
+    subreddit: str
+    ups: int
+    country: str
+    score: int
+    collected_at: datetime = Field(alias="collectedAt")
+
+    model_config = {"populate_by_name": True}
+
+
+class LeaderboardEntryPublic(BaseModel):
+    id: str
+    user_id: str = Field(alias="userId")
+    display_name: str = Field(alias="displayName")
+    total_score: int = Field(alias="totalScore")
+    rounds: int
+    seconds_per_round: int = Field(alias="secondsPerRound")
+    mode: str
+    region: str
+    played_at: datetime = Field(alias="playedAt")
+    is_me: bool = Field(default=False, alias="isMe")
 
     model_config = {"populate_by_name": True}
 

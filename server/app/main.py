@@ -9,7 +9,7 @@ from pymongo.errors import ServerSelectionTimeoutError
 
 from app.config import PORT
 from app.database import ensure_indexes, get_client
-from app.routes import ai, auth
+from app.routes import ai, auth, leaderboard, memes
 
 
 @asynccontextmanager
@@ -40,6 +40,8 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(ai.router)
+app.include_router(leaderboard.router)
+app.include_router(memes.router)
 
 
 @app.get("/health")

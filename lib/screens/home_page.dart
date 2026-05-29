@@ -782,6 +782,8 @@ class _LoggedInPill extends StatelessWidget {
         return const Color(0xFF4285F4);
       case AuthProvider.facebook:
         return const Color(0xFF1877F2);
+      case AuthProvider.github:
+        return const Color(0xFF24292F);
       case AuthProvider.email:
         return MatchdayPalette.ink;
     }

@@ -27,6 +27,23 @@ FACEBOOK_APP_ID: str = os.getenv("FACEBOOK_APP_ID", "").strip()
 FACEBOOK_LIMITED_LOGIN_RELAXED: bool = os.getenv(
     "FACEBOOK_LIMITED_LOGIN_RELAXED", "true"
 ).strip().lower() in ("1", "true", "yes")
+# GitHub OAuth — App 用 code 換 token，secret 僅放後端
+GITHUB_CLIENT_ID: str = os.getenv("GITHUB_CLIENT_ID", "").strip()
+GITHUB_CLIENT_SECRET: str = os.getenv("GITHUB_CLIENT_SECRET", "").strip()
+GITHUB_OAUTH_REDIRECT_URI: str = os.getenv(
+    "GITHUB_OAUTH_REDIRECT_URI",
+    "com.example.geoGuesser://github-callback",
+).strip()
+
+# 啟動時清空 leaderboard_entries（僅開發用，清空後請改回 false）
+LEADERBOARD_CLEAR_ON_START: bool = os.getenv(
+    "LEADERBOARD_CLEAR_ON_START", "false"
+).strip().lower() in ("1", "true", "yes")
+
+# 啟動時清空 user_memes（僅開發用）
+MEME_CLEAR_ON_START: bool = os.getenv(
+    "MEME_CLEAR_ON_START", "false"
+).strip().lower() in ("1", "true", "yes")
 
 # AI 對戰 — 抓 Street View Static 圖（須啟用 Street View Static API；
 # 若這把 key 在 Google Cloud 限制成只給 iOS app，後端抓圖會失敗，需放寬或另開一把）

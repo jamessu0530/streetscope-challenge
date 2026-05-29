@@ -23,6 +23,7 @@ import '../models/guess_result.dart';
 import '../models/meme_result.dart';
 import '../models/place.dart';
 import '../services/ai_opponent_service.dart';
+import '../services/auth_service.dart';
 import '../services/audio_service.dart';
 import '../services/country_lookup_service.dart';
 import '../services/meme_collection_service.dart';
@@ -34,9 +35,6 @@ import '../widgets/guess_map.dart';
 import '../widgets/meme_punishment_overlay.dart';
 import '../widgets/street_view_panel.dart';
 import 'result_page.dart';
-
-/// 倒數剩餘秒數 ≤ 此值 → 開始播 lofi BGM（一開始太吵，最後衝刺再出來比較有感）
-const int kBgmStartRemainingSeconds = 30;
 
 class GamePage extends StatefulWidget {
   final GameSettings settings;
@@ -87,6 +85,9 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   /// 倒數 widget 的最新回呼值，用來決定什麼時候該播 tick。
   int _lastTickSecond = -1;
 
+  /// 0 = lofi（≤30s）、1 = 探索（>30s）、-1 = 尚未指定（換回合後重設）。
+  int _bgmPhase = -1;
+
   Place get _currentPlace => _places![_currentRound];
 
   @override
@@ -101,10 +102,10 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     super.didChangeAppLifecycleState(state);
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive) {
-      AudioService.instance.pauseGameBgm();
+      AudioService.instance.pauseInGameBgm();
     } else if (state == AppLifecycleState.resumed) {
-      if (AudioService.instance.isGameBgmPlaying) {
-        AudioService.instance.resumeGameBgm();
+      if (AudioService.instance.isInGameBgmPlaying) {
+        AudioService.instance.resumeInGameBgm();
       }
     }
   }
@@ -112,7 +113,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    AudioService.instance.stopGameBgm();
+    AudioService.instance.stopAllInGameBgm();
     super.dispose();
   }
 
@@ -304,7 +305,8 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     });
 
     // 送出就停 BGM；等下一題再視倒數重新啟動
-    AudioService.instance.stopGameBgm();
+    _bgmPhase = -1;
+    AudioService.instance.stopAllInGameBgm();
 
     // move 模式：用玩家「整段沿路足跡」讓 AI 判斷（picture / noMove 已在回合開始算）。
     if (widget.settings.vsAi && widget.settings.mode == GameMode.move) {
@@ -330,17 +332,26 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   }
 
   /// 倒數每秒回呼：
-  /// - 剩餘 ≤ 30 秒 → 啟動 lofi BGM（若尚未啟動）
+  /// - 剩餘 > 30 秒 → 輕柔探索 BGM（最長可達 [kMaxSecondsPerRound]）
+  /// - 剩餘 ≤ 30 秒 → lofi BGM
   /// - 剩餘 ≤ 5 秒  → 每秒播一次 tick
   void _handleCountdownTick(int remaining) {
-    // 低於 30 秒才開始鋪 lofi
-    if (remaining > 0 &&
-        remaining <= kBgmStartRemainingSeconds &&
-        !AudioService.instance.isGameBgmPlaying) {
-      AudioService.instance.startGameBgm();
+    // onTick 每 250ms 觸發；只在「整秒」跨過 30 秒門檻時切換 BGM 一次。
+    if (remaining > kCalmBgmEndRemainingSeconds) {
+      if (_bgmPhase != 1) {
+        _bgmPhase = 1;
+        unawaited(AudioService.instance.ensureCalmGameBgm());
+      }
+    } else if (remaining > 0 && remaining <= kCalmBgmEndRemainingSeconds) {
+      if (_bgmPhase != 0) {
+        _bgmPhase = 0;
+        unawaited(AudioService.instance.ensureGameBgm());
+      }
     }
 
     if (remaining <= 0) {
+      _bgmPhase = -1;
+      unawaited(AudioService.instance.stopAllInGameBgm());
       _lastTickSecond = -1;
       return;
     }
@@ -379,7 +390,8 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         _memeLoading = false;
       });
       // 有抓到 meme 就順手存進「迷因收集庫」。失敗就算了，不影響主流程。
-      if (outcome.selectedMeme != null) {
+      if (outcome.selectedMeme != null &&
+          AuthService.instance.isLoggedIn) {
         unawaited(MemeCollectionService.instance.add(
           meme: outcome.selectedMeme!,
           country: outcome.country,
@@ -469,14 +481,15 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
       _mapController = null;
       _timerKey = UniqueKey();
       _lastTickSecond = -1;
+      _bgmPhase = -1;
       // 清掉上一回合的 meme 彩蛋
       _memeOverlayOpen = false;
       _memeOutcome = null;
       _memeLoading = false;
       _memeRequestSeq++;
     });
-    // 下一題一開始先靜音；要等倒數再度 ≤ 30 秒才播。
-    AudioService.instance.stopGameBgm();
+    // 下一題一開始先靜音；要等倒數再度 > 30 秒才播探索曲、≤ 30 才播 lofi。
+    AudioService.instance.stopAllInGameBgm();
     // 新回合 → 足跡重置、背景啟動 AI 猜測（picture / noMove）。
     _resetMoveTrailForRound(_currentRound);
     _kickAiForRound(_currentRound);

@@ -50,6 +50,28 @@ String get kFacebookAppId {
 
 bool get hasFacebookAppId => kFacebookAppId.isNotEmpty;
 
+/// GitHub OAuth App Client ID（Flutter 開授權頁用）。
+String get kGithubClientId {
+  final String fromDotEnv =
+      dotenv.maybeGet('GITHUB_CLIENT_ID')?.trim() ?? '';
+  if (fromDotEnv.isNotEmpty) return fromDotEnv;
+  return const String.fromEnvironment('GITHUB_CLIENT_ID', defaultValue: '')
+      .trim();
+}
+
+/// 須與 GitHub OAuth App 的 Authorization callback URL 一致。
+String get kGithubOAuthRedirectUri {
+  final String fromDotEnv =
+      dotenv.maybeGet('GITHUB_OAUTH_REDIRECT_URI')?.trim() ?? '';
+  if (fromDotEnv.isNotEmpty) return fromDotEnv;
+  return const String.fromEnvironment(
+    'GITHUB_OAUTH_REDIRECT_URI',
+    defaultValue: 'com.example.geoGuesser://github-callback',
+  ).trim();
+}
+
+bool get hasGithubOAuth => kGithubClientId.isNotEmpty;
+
 /// MongoDB 連線字串 — 僅供未來後端或本機腳本參考；Flutter UI 不應直連資料庫。
 String get kMongoDbUri =>
     dotenv.maybeGet('MONGODB_URI')?.trim() ??

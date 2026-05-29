@@ -1,5 +1,5 @@
 // =============================================================================
-// AuthService — Email 登入接 FastAPI + MongoDB；Google / Facebook 仍為本機 mock。
+// AuthService — Email / Google / Facebook / GitHub 登入接 FastAPI + MongoDB。
 // =============================================================================
 
 import 'dart:convert';
@@ -9,9 +9,9 @@ import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-
 import '../config/env.dart';
 import '../models/auth_user.dart';
+import 'github_sign_in_service.dart';
 import 'google_sign_in_service.dart';
 
 class AuthException implements Exception {
@@ -77,19 +77,31 @@ class AuthService {
 
   bool get isLoggedIn => currentUser.value != null;
 
+  /// 註冊成功後會直接寫入 JWT 並登入（與 Google / GitHub 相同）。
   Future<AuthUser> registerWithEmail({
     required String email,
     required String password,
     required String displayName,
   }) async {
-    return _authPost(
-      '/auth/register',
-      <String, dynamic>{
-        'email': email.trim(),
-        'password': password,
-        'displayName': displayName.trim(),
-      },
-    );
+    final String trimmedEmail = email.trim();
+    final String trimmedName = displayName.trim();
+
+    try {
+      return await _authPost(
+        '/auth/register',
+        <String, dynamic>{
+          'email': trimmedEmail,
+          'password': password,
+          'displayName': trimmedName,
+        },
+      );
+    } on AuthException catch (e) {
+      // 舊版或異常回應若未帶 token，改以同組帳密登入（帳號已建立時）
+      if (e.message.contains('伺服器回應格式錯誤')) {
+        return loginWithEmail(email: trimmedEmail, password: password);
+      }
+      rethrow;
+    }
   }
 
   Future<AuthUser> loginWithEmail({
@@ -133,6 +145,29 @@ class AuthService {
       '/auth/google',
       <String, dynamic>{'idToken': idToken},
     );
+  }
+
+  Future<AuthUser> signInWithGitHub() async {
+    if (!hasApi) {
+      throw AuthException('請在 .env 設定 API_BASE_URL');
+    }
+    if (!hasGithubOAuth) {
+      throw AuthException(
+        '請在 .env 設定 GITHUB_CLIENT_ID\n詳見 docs/GITHUB_SIGNIN.md',
+      );
+    }
+
+    try {
+      final String code = await GitHubSignInService.instance.authorize();
+      return _authPost(
+        '/auth/github',
+        <String, dynamic>{'code': code},
+      );
+    } on GitHubSignInCanceled {
+      throw AuthException('已取消 GitHub 登入');
+    } catch (e) {
+      throw AuthException('GitHub 登入失敗：$e');
+    }
   }
 
   Future<AuthUser> signInWithFacebook() async {
@@ -342,7 +377,10 @@ class AuthService {
   }
 
   Future<AuthUser> _applyAuthResponse(Map<String, dynamic> data) async {
-    final String? token = data['accessToken'] as String?;
+    final String? token = (data['accessToken'] as String?)?.trim().isNotEmpty ==
+            true
+        ? data['accessToken'] as String
+        : (data['access_token'] as String?)?.trim();
     final dynamic userJson = data['user'];
     if (token == null || token.isEmpty || userJson is! Map<String, dynamic>) {
       throw AuthException('伺服器回應格式錯誤');

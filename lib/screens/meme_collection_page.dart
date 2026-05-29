@@ -14,7 +14,9 @@ import 'package:flutter/material.dart';
 
 import '../models/collected_meme.dart';
 import '../services/audio_service.dart';
+import '../services/auth_service.dart';
 import '../services/meme_collection_service.dart';
+import 'login_page.dart';
 import '../widgets/floating_home_nav_bar.dart';
 import '../widgets/matchday_ui.dart';
 
@@ -27,6 +29,7 @@ class MemeCollectionPage extends StatefulWidget {
 
 class _MemeCollectionPageState extends State<MemeCollectionPage> {
   bool _loading = true;
+  String? _error;
   Map<String, List<CollectedMeme>> _grouped =
       const <String, List<CollectedMeme>>{};
   int _totalCount = 0;
@@ -38,18 +41,48 @@ class _MemeCollectionPageState extends State<MemeCollectionPage> {
   }
 
   Future<void> _load() async {
-    final Map<String, List<CollectedMeme>> grouped =
-        await MemeCollectionService.instance.loadGroupedByCountry();
-    if (!mounted) return;
-    final int total = grouped.values.fold<int>(
-      0,
-      (int acc, List<CollectedMeme> v) => acc + v.length,
-    );
-    setState(() {
-      _grouped = grouped;
-      _totalCount = total;
-      _loading = false;
-    });
+    if (!AuthService.instance.isLoggedIn) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = '請先登入才能查看你的迷因庫';
+        _grouped = const <String, List<CollectedMeme>>{};
+        _totalCount = 0;
+      });
+      return;
+    }
+
+    try {
+      final Map<String, List<CollectedMeme>> grouped =
+          await MemeCollectionService.instance.loadGroupedByCountry();
+      if (!mounted) return;
+      final int total = grouped.values.fold<int>(
+        0,
+        (int acc, List<CollectedMeme> v) => acc + v.length,
+      );
+      setState(() {
+        _grouped = grouped;
+        _totalCount = total;
+        _error = null;
+        _loading = false;
+      });
+    } on MemeCollectionException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.message;
+        _grouped = const <String, List<CollectedMeme>>{};
+        _totalCount = 0;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = '載入失敗：$e';
+        _grouped = const <String, List<CollectedMeme>>{};
+        _totalCount = 0;
+        _loading = false;
+      });
+    }
   }
 
   Future<void> _confirmClear() async {
@@ -117,9 +150,24 @@ class _MemeCollectionPageState extends State<MemeCollectionPage> {
                 Expanded(
                   child: _loading
                       ? const Center(child: CircularProgressIndicator())
-                      : (sorted.isEmpty
-                          ? const _EmptyState()
-                          : ListView.builder(
+                      : (_error != null
+                          ? _LoginOrErrorState(
+                              message: _error!,
+                              onLogin: () async {
+                                await Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (BuildContext _) =>
+                                        const LoginPage(),
+                                  ),
+                                );
+                                if (!mounted) return;
+                                setState(() => _loading = true);
+                                await _load();
+                              },
+                            )
+                          : (sorted.isEmpty
+                              ? const _EmptyState()
+                              : ListView.builder(
                               // 底部多 110 給浮動 nav bar
                               padding: const EdgeInsets.fromLTRB(0, 4, 0, 110),
                               itemCount: sorted.length,
@@ -131,7 +179,7 @@ class _MemeCollectionPageState extends State<MemeCollectionPage> {
                                   memes: e.value,
                                 );
                               },
-                            )),
+                            ))),
                 ),
               ],
             ),
@@ -397,6 +445,60 @@ class _MemeThumb extends StatelessWidget {
   }
 }
 
+class _LoginOrErrorState extends StatelessWidget {
+  final String message;
+  final VoidCallback onLogin;
+
+  const _LoginOrErrorState({
+    required this.message,
+    required this.onLogin,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            const Icon(
+              Icons.lock_outline,
+              size: 56,
+              color: MatchdayPalette.ink,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+                color: MatchdayPalette.ink,
+                height: 1.5,
+              ),
+            ),
+            if (!AuthService.instance.isLoggedIn) ...<Widget>[
+              const SizedBox(height: 16),
+              FilledButton(
+                onPressed: onLogin,
+                style: FilledButton.styleFrom(
+                  backgroundColor: MatchdayPalette.ink,
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text(
+                  '前往登入',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 // =============================================================================
 // 空狀態
 // =============================================================================
@@ -428,7 +530,7 @@ class _EmptyState extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             const Text(
-              '遊戲中本回合分數為 0 分時會觸發懲罰，\n同時把 meme 收進這裡。',
+              '登入後，本回合 0 分觸發懲罰時\n抓到的 meme 會依國家存入你的雲端迷因庫。',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 12,

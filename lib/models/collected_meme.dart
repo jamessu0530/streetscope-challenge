@@ -10,6 +10,7 @@ import 'dart:convert';
 import '../models/meme_result.dart';
 
 class CollectedMeme {
+  final String id;
   final String title;
   final String imageUrl;
   final String postUrl;
@@ -26,6 +27,7 @@ class CollectedMeme {
   final DateTime collectedAt;
 
   const CollectedMeme({
+    this.id = '',
     required this.title,
     required this.imageUrl,
     required this.postUrl,
@@ -35,6 +37,29 @@ class CollectedMeme {
     required this.score,
     required this.collectedAt,
   });
+
+  factory CollectedMeme.fromApiJson(Map<String, dynamic> json) {
+    return CollectedMeme(
+      id: (json['id'] as String?) ?? '',
+      title: (json['title'] as String?) ?? '',
+      imageUrl: (json['imageUrl'] as String?) ??
+          (json['image_url'] as String?) ??
+          '',
+      postUrl: (json['postUrl'] as String?) ??
+          (json['post_url'] as String?) ??
+          '',
+      subreddit: (json['subreddit'] as String?) ?? '',
+      ups: (json['ups'] as num?)?.toInt() ?? 0,
+      country: json['country'] as String?,
+      score: (json['score'] as num?)?.toInt() ?? 0,
+      collectedAt: DateTime.tryParse(
+            json['collectedAt'] as String? ??
+                json['collected_at'] as String? ??
+                '',
+          ) ??
+          DateTime.now(),
+    );
+  }
 
   factory CollectedMeme.fromResult({
     required MemeResult meme,
@@ -58,6 +83,7 @@ class CollectedMeme {
       (country == null || country!.trim().isEmpty) ? 'Unknown' : country!;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
+        'id': id,
         'title': title,
         'image_url': imageUrl,
         'post_url': postUrl,
@@ -70,6 +96,7 @@ class CollectedMeme {
 
   factory CollectedMeme.fromJson(Map<String, dynamic> j) {
     return CollectedMeme(
+      id: (j['id'] as String?) ?? '',
       title: (j['title'] as String?) ?? '',
       imageUrl: (j['image_url'] as String?) ?? '',
       postUrl: (j['post_url'] as String?) ?? '',

@@ -10,9 +10,11 @@
 
 import 'package:flutter/material.dart';
 
+import '../models/auth_user.dart';
 import '../models/game_settings.dart';
 import '../models/guess_result.dart';
 import '../services/audio_service.dart';
+import '../services/auth_service.dart';
 import '../services/leaderboard_service.dart';
 import '../utils/score_utils.dart';
 import 'home_page.dart';
@@ -38,16 +40,12 @@ class ResultPage extends StatefulWidget {
 
 class _ResultPageState extends State<ResultPage>
     with SingleTickerProviderStateMixin {
-  static const int _maxNameLength = 16;
   bool _saving = true;
+  bool _savedToCloud = false;
+  String? _saveMessage;
+  String? _savedEntryId;
   int? _highlightIndex;
   late final AnimationController _chartCtrl;
-
-  // 玩家名字：預設 JAMES，使用者可自行改。排行榜會跟著更新。
-  static const String _defaultName = 'JAMES';
-  late final TextEditingController _nameCtrl =
-      TextEditingController(text: _defaultName);
-  DateTime? _savedAt;
 
   int get _totalScore =>
       widget.results.fold<int>(0, (int sum, GuessResult r) => sum + r.score);
@@ -101,30 +99,47 @@ class _ResultPageState extends State<ResultPage>
   @override
   void dispose() {
     _chartCtrl.dispose();
-    _nameCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _saveRun() async {
-    final DateTime savedAt = await LeaderboardService.instance.saveRun(
-      results: widget.results,
-      settings: widget.settings,
-      name: _nameCtrl.text,
-    );
-    if (!mounted) return;
-    setState(() {
-      _savedAt = savedAt;
-      _saving = false;
-    });
-  }
+    if (!AuthService.instance.isLoggedIn) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _savedToCloud = false;
+        _saveMessage = '未登入：本局不會寫入雲端排行榜';
+      });
+      return;
+    }
 
-  void _onNameChanged(String value) {
-    final DateTime? at = _savedAt;
-    if (at == null) return;
-    LeaderboardService.instance.updateEntryName(
-      playedAt: at,
-      name: value,
-    );
+    try {
+      final String? entryId = await LeaderboardService.instance.saveRun(
+        results: widget.results,
+        settings: widget.settings,
+      );
+      if (!mounted) return;
+      setState(() {
+        _savedEntryId = entryId;
+        _savedToCloud = entryId != null;
+        _saveMessage = '已存入雲端排行榜';
+        _saving = false;
+      });
+    } on LeaderboardException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _savedToCloud = false;
+        _saveMessage = e.message;
+        _saving = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _savedToCloud = false;
+        _saveMessage = '排行榜儲存失敗：$e';
+        _saving = false;
+      });
+    }
   }
 
   // ---- 設計 token（Apple Health 風） --------------------------------------
@@ -150,7 +165,7 @@ class _ResultPageState extends State<ResultPage>
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 children: <Widget>[
                   const SizedBox(height: 12),
-                  _buildNameField(),
+                  _buildLeaderboardStatus(),
                   const SizedBox(height: 16),
                   _buildHeroNumber(),
                   if (_vsAi) ...<Widget>[
@@ -171,7 +186,7 @@ class _ResultPageState extends State<ResultPage>
                       padding: EdgeInsets.only(bottom: 8),
                       child: Center(
                         child: Text(
-                          'Saving run…',
+                          '正在寫入雲端排行榜…',
                           style: TextStyle(
                             fontSize: 12,
                             color: _ink3,
@@ -226,64 +241,44 @@ class _ResultPageState extends State<ResultPage>
     return '$mode · $region';
   }
 
-  // ---- 玩家名字（極簡下底線輸入） -----------------------------------------
-  Widget _buildNameField() {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.end,
+  Widget _buildLeaderboardStatus() {
+    final AuthUser? user = AuthService.instance.currentUser.value;
+    final String? msg = _saveMessage;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        const Padding(
-          padding: EdgeInsets.only(bottom: 8),
-          child: Text(
-            'NAME',
-            style: TextStyle(
-              fontSize: 10,
-              letterSpacing: 2.4,
-              fontWeight: FontWeight.w800,
-              color: _ink3,
-            ),
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: TextField(
-            controller: _nameCtrl,
-            onChanged: _onNameChanged,
-            textCapitalization: TextCapitalization.characters,
-            maxLength: _maxNameLength,
+        if (user != null)
+          Text(
+            user.displayName.toUpperCase(),
             style: const TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w800,
               color: _ink,
               letterSpacing: 2,
             ),
-            decoration: const InputDecoration(
-              isDense: true,
-              counterText: '',
-              hintText: _defaultName,
-              hintStyle: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-                color: _ink3,
-                letterSpacing: 2,
-              ),
-              contentPadding: EdgeInsets.symmetric(vertical: 6),
-              border: UnderlineInputBorder(
-                borderSide: BorderSide(color: _divider),
-              ),
-              enabledBorder: UnderlineInputBorder(
-                borderSide: BorderSide(color: _divider),
-              ),
-              focusedBorder: UnderlineInputBorder(
-                borderSide: BorderSide(color: _ink, width: 1.4),
-              ),
+          )
+        else
+          const Text(
+            '訪客模式',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: _ink3,
+              letterSpacing: 2,
             ),
           ),
-        ),
-        const SizedBox(width: 8),
-        const Padding(
-          padding: EdgeInsets.only(bottom: 8),
-          child: Icon(Icons.edit_outlined, size: 14, color: _ink3),
-        ),
+        if (msg != null) ...<Widget>[
+          const SizedBox(height: 6),
+          Text(
+            msg,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: _savedToCloud ? const Color(0xFF2E7D32) : _ink2,
+              letterSpacing: 0.3,
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -629,7 +624,9 @@ class _ResultPageState extends State<ResultPage>
                 Navigator.push(
                   context,
                   MaterialPageRoute<void>(
-                    builder: (BuildContext context) => const LeaderboardPage(),
+                    builder: (BuildContext context) => LeaderboardPage(
+                      highlightEntryId: _savedEntryId,
+                    ),
                   ),
                 );
               },

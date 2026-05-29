@@ -16,9 +16,11 @@ from app.facebook_auth import (
     verify_facebook_access_token,
     verify_limited_authentication_token,
 )
+from app.github_auth import exchange_code_for_token, fetch_github_profile
 from app.google_auth import verify_google_id_token
 from app.schemas import (
     AuthResponse,
+    GitHubSignInRequest,
     ChangePasswordRequest,
     FacebookSignInRequest,
     ForgotPasswordRequest,
@@ -89,7 +91,11 @@ async def get_current_user(
     return doc
 
 
-@router.post("/register", response_model=AuthResponse)
+@router.post(
+    "/register",
+    response_model=AuthResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def register(body: RegisterRequest) -> AuthResponse:
     email = body.email.strip().lower()
     col = users_collection()
@@ -174,6 +180,46 @@ async def google_sign_in(body: GoogleSignInRequest) -> AuthResponse:
                 }
             },
         )
+        doc = col.find_one({"_id": doc["_id"]}) or doc
+
+    return _auth_response(doc)
+
+
+@router.post("/github", response_model=AuthResponse)
+async def github_sign_in(body: GitHubSignInRequest) -> AuthResponse:
+    access_token = exchange_code_for_token(body.code)
+    profile = fetch_github_profile(access_token)
+
+    github_id = profile["id"]
+    display_name = profile["displayName"]
+    email = profile.get("email")
+    login = profile.get("login") or ""
+
+    col = users_collection()
+    doc = col.find_one({"githubId": github_id})
+    now = utc_now()
+
+    if doc is None:
+        doc = {
+            "githubId": github_id,
+            "githubLogin": login,
+            "email": email or f"{github_id}@github.local",
+            "displayName": display_name,
+            "provider": "github",
+            "createdAt": now,
+            "updatedAt": now,
+        }
+        result = col.insert_one(doc)
+        doc["_id"] = result.inserted_id
+    else:
+        updates: dict = {
+            "displayName": display_name,
+            "githubLogin": login,
+            "updatedAt": now,
+        }
+        if email:
+            updates["email"] = email
+        col.update_one({"_id": doc["_id"]}, {"$set": updates})
         doc = col.find_one({"_id": doc["_id"]}) or doc
 
     return _auth_response(doc)
