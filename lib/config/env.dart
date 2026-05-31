@@ -20,6 +20,21 @@ String get kApiBaseUrl =>
 
 bool get hasApiBaseUrl => kApiBaseUrl.isNotEmpty;
 
+/// WebSocket 根網址（由 API_BASE_URL 自動轉 ws / wss）。
+String get kWsBaseUrl {
+  final String base = kApiBaseUrl.trim();
+  if (base.isEmpty) return '';
+  if (base.startsWith('https://')) {
+    return base.replaceFirst('https://', 'wss://');
+  }
+  if (base.startsWith('http://')) {
+    return base.replaceFirst('http://', 'ws://');
+  }
+  return base;
+}
+
+bool get hasWsBaseUrl => kWsBaseUrl.isNotEmpty;
+
 /// Google OAuth Web Client ID（後端驗 idToken、Flutter serverClientId）。
 String get kGoogleWebClientId {
   final String fromDotEnv =

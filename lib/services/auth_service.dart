@@ -2,6 +2,7 @@
 // AuthService — Email / Google / Facebook / GitHub 登入接 FastAPI + MongoDB。
 // =============================================================================
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -13,6 +14,7 @@ import '../config/env.dart';
 import '../models/auth_user.dart';
 import 'github_sign_in_service.dart';
 import 'google_sign_in_service.dart';
+import 'realtime_service.dart';
 
 class AuthException implements Exception {
   AuthException(this.message);
@@ -63,6 +65,7 @@ class AuthService {
         final AuthUser user = await _fetchMe(_accessToken!);
         currentUser.value = user;
         await _persistUserOnly(user);
+        unawaited(RealtimeService.instance.connect());
         return;
       } catch (_) {
         await _clearSession(prefs);
@@ -227,6 +230,7 @@ class AuthService {
   }
 
   Future<void> signOut() async {
+    await RealtimeService.instance.disconnect();
     final AuthProvider? provider = currentUser.value?.provider;
     if (provider == AuthProvider.google && hasGoogleOAuth) {
       try {
@@ -393,6 +397,7 @@ class AuthService {
     await prefs.setString(_kAccessTokenKey, token);
     await _persistUserOnly(user);
     currentUser.value = user;
+    unawaited(RealtimeService.instance.connect());
     return user;
   }
 

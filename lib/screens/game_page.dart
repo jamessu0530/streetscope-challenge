@@ -27,8 +27,12 @@ import '../services/auth_service.dart';
 import '../services/audio_service.dart';
 import '../services/country_lookup_service.dart';
 import '../services/meme_collection_service.dart';
+import '../models/auth_user.dart';
+import '../models/duel_messages.dart';
 import '../services/meme_service.dart';
 import '../services/place_picker_service.dart';
+import '../services/realtime_service.dart';
+import 'duel_result_page.dart';
 import '../utils/map_utils.dart';
 import '../widgets/countdown_timer_widget.dart';
 import '../widgets/guess_map.dart';
@@ -88,12 +92,22 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   /// 0 = lofi（≤30s）、1 = 探索（>30s）、-1 = 尚未指定（換回合後重設）。
   int _bgmPhase = -1;
 
+  bool _duelOpponentSubmitted = false;
+  bool _duelCanAdvance = false;
+  int? _duelOpponentScore;
+  double? _duelOpponentDistanceKm;
+
+  bool get _vsPlayer => widget.settings.vsPlayer;
+
   Place get _currentPlace => _places![_currentRound];
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    if (_vsPlayer) {
+      RealtimeService.instance.bindDuelGameHandler(_onDuelGameEvent);
+    }
     _initPlaces();
   }
 
@@ -112,13 +126,110 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    if (_vsPlayer) {
+      RealtimeService.instance.unbindDuelGameHandler();
+    }
     WidgetsBinding.instance.removeObserver(this);
     AudioService.instance.stopAllInGameBgm();
     super.dispose();
   }
 
+  bool _duelRoomMatches(Map<String, dynamic> payload) {
+    final String? payloadRoom = (payload['roomId'] as String?)?.trim();
+    final String? myRoom = widget.settings.duelRoomId?.trim();
+    if (myRoom == null || myRoom.isEmpty) return true;
+    if (payloadRoom == null || payloadRoom.isEmpty) return true;
+    return payloadRoom == myRoom;
+  }
+
+  void _onDuelGameEvent(Map<String, dynamic> payload) {
+    if (!_duelRoomMatches(payload)) return;
+
+    final String type = (payload['type'] as String?) ?? '';
+    if (type == 'duel_opponent_submitted') {
+      if (!mounted) return;
+      setState(() => _duelOpponentSubmitted = true);
+      return;
+    }
+
+    if (type == 'duel_round_complete') {
+      final DuelRoundComplete complete = DuelRoundComplete.fromJson(payload);
+      final AuthUser? me = AuthService.instance.currentUser.value;
+      if (me == null || !mounted) return;
+
+      DuelRoundPlayerResult? opponent;
+      final String myId = me.id.trim();
+      for (final DuelRoundPlayerResult p in complete.players) {
+        if (p.id.trim() != myId) {
+          opponent = p;
+          break;
+        }
+      }
+
+      setState(() {
+        _duelOpponentSubmitted = true;
+        _duelCanAdvance = true;
+        if (opponent != null) {
+          _duelOpponentScore = opponent.score;
+          _duelOpponentDistanceKm = opponent.distanceKm;
+        }
+      });
+
+      if (complete.matchEnd) {
+        _finishDuelMatch(complete, me.id);
+      }
+      return;
+    }
+
+    if (type == 'duel_sync_next_round') {
+      final int? finishedRound = (payload['round'] as num?)?.toInt();
+      if (finishedRound == null || !mounted) return;
+      if (!_submitted || !_duelCanAdvance || finishedRound != _currentRound) {
+        return;
+      }
+      if (_currentRound >= (_places?.length ?? 0) - 1) return;
+      _advanceToNextRound();
+      return;
+    }
+  }
+
+  void _finishDuelMatch(DuelRoundComplete complete, String myId) {
+    int myTotal = 0;
+    int oppTotal = 0;
+    String oppName = widget.settings.opponentDisplayName ?? '對手';
+    for (final DuelRoundPlayerResult t in complete.totals) {
+      if (t.id == myId) {
+        myTotal = t.score;
+      } else {
+        oppTotal = t.score;
+        oppName = t.displayName;
+      }
+    }
+    final AuthUser? me = AuthService.instance.currentUser.value;
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute<void>(
+        builder: (BuildContext context) => DuelResultPage(
+          myName: me?.displayName ?? '你',
+          opponentName: oppName,
+          myTotal: myTotal,
+          opponentTotal: oppTotal,
+          winnerId: complete.winnerId,
+          myUserId: myId,
+        ),
+      ),
+    );
+  }
+
   Future<void> _initPlaces() async {
     try {
+      final List<Place>? preset = widget.settings.presetPlaces;
+      if (preset != null && preset.isNotEmpty) {
+        if (!mounted) return;
+        setState(() => _places = List<Place>.from(preset));
+        _resetMoveTrailForRound(_currentRound);
+        return;
+      }
       final List<Place> picked = await generateRandomPlaces(
         count: widget.settings.roundsPerGame,
         region: widget.settings.region,
@@ -324,9 +435,25 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
       );
     }
 
+    if (_vsPlayer) {
+      _duelOpponentSubmitted = false;
+      _duelCanAdvance = false;
+      _duelOpponentScore = null;
+      _duelOpponentDistanceKm = null;
+      final String? roomId = widget.settings.duelRoomId?.trim();
+      if (roomId != null && roomId.isNotEmpty) {
+        RealtimeService.instance.submitDuelRound(
+          roomId: roomId,
+          round: _currentRound,
+          score: result.score,
+          distanceKm: result.distanceKm,
+          guessed: result.guessed,
+        );
+      }
+    }
+
     // 低分懲罰：本回合 <1000 分 → 背景抓 meme 後疊加顯示。
-    // 不 await，不阻塞主流程；抓到再更新狀態。
-    if (result.score < kMemePunishmentScoreThreshold) {
+    if (!_vsPlayer && result.score < kMemePunishmentScoreThreshold) {
       _triggerMemePunishment(result);
     }
   }
@@ -459,7 +586,20 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   }
 
   void _goToNextRoundOrFinish() {
+    if (_vsPlayer && !_duelCanAdvance) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('等待對手完成本回合…')),
+      );
+      return;
+    }
+
     if (_currentRound >= _places!.length - 1) {
+      if (_vsPlayer) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('等待對戰結算…')),
+        );
+        return;
+      }
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
@@ -473,6 +613,25 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
       return;
     }
 
+    if (_vsPlayer) {
+      final String? roomId = widget.settings.duelRoomId?.trim();
+      if (roomId != null && roomId.isNotEmpty) {
+        RealtimeService.instance.requestDuelAdvanceRound(
+          roomId: roomId,
+          finishedRound: _currentRound,
+        );
+      }
+      _advanceToNextRound();
+      return;
+    }
+
+    _advanceToNextRound();
+  }
+
+  /// 進入下一回合（真人對戰：對手按鈕也會觸發同步）。
+  void _advanceToNextRound() {
+    if (_places == null || _currentRound >= _places!.length - 1) return;
+
     setState(() {
       _currentRound += 1;
       _guessedLocation = null;
@@ -482,15 +641,16 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
       _timerKey = UniqueKey();
       _lastTickSecond = -1;
       _bgmPhase = -1;
-      // 清掉上一回合的 meme 彩蛋
+      _duelOpponentSubmitted = false;
+      _duelCanAdvance = false;
+      _duelOpponentScore = null;
+      _duelOpponentDistanceKm = null;
       _memeOverlayOpen = false;
       _memeOutcome = null;
       _memeLoading = false;
       _memeRequestSeq++;
     });
-    // 下一題一開始先靜音；要等倒數再度 > 30 秒才播探索曲、≤ 30 才播 lofi。
     AudioService.instance.stopAllInGameBgm();
-    // 新回合 → 足跡重置、背景啟動 AI 猜測（picture / noMove）。
     _resetMoveTrailForRound(_currentRound);
     _kickAiForRound(_currentRound);
   }
@@ -544,6 +704,13 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
                 wasTimeUp: _roundSummaryWasTimeUp,
                 result: _submitted ? summaryResult : null,
                 vsAi: widget.settings.vsAi,
+                vsPlayer: _vsPlayer,
+                opponentName:
+                    widget.settings.opponentDisplayName ?? '對手',
+                duelOpponentSubmitted: _duelOpponentSubmitted,
+                duelOpponentScore: _duelOpponentScore,
+                duelOpponentDistanceKm: _duelOpponentDistanceKm,
+                duelCanAdvance: _duelCanAdvance,
                 aiThinking: _aiIsThinking(_currentRound),
                 aiResult: _aiResultForRound(_currentRound),
                 aiReasoning: _aiGuessByRound[_currentRound]?.reasoning,
@@ -921,6 +1088,12 @@ class _MapOverlay extends StatelessWidget {
   final bool wasTimeUp;
   final GuessResult? result;
   final bool vsAi;
+  final bool vsPlayer;
+  final String opponentName;
+  final bool duelOpponentSubmitted;
+  final int? duelOpponentScore;
+  final double? duelOpponentDistanceKm;
+  final bool duelCanAdvance;
   final bool aiThinking;
   final GuessResult? aiResult;
   final String? aiReasoning;
@@ -938,6 +1111,12 @@ class _MapOverlay extends StatelessWidget {
     required this.wasTimeUp,
     required this.result,
     required this.vsAi,
+    this.vsPlayer = false,
+    this.opponentName = '對手',
+    this.duelOpponentSubmitted = false,
+    this.duelOpponentScore,
+    this.duelOpponentDistanceKm,
+    this.duelCanAdvance = false,
     required this.aiThinking,
     required this.aiResult,
     required this.aiReasoning,
@@ -956,8 +1135,13 @@ class _MapOverlay extends StatelessWidget {
     final double bottomSafe = MediaQuery.of(context).padding.bottom;
 
     // 底部操作條高度估計（給地圖的縮放按鈕 bottomInset 用）
-    final double bottomBarHeight =
-        submitted ? (vsAi ? 210 : 120) : 110;
+    final double bottomBarHeight = submitted
+        ? (vsAi
+            ? 210
+            : vsPlayer
+                ? 200
+                : 120)
+        : 110;
 
     return Positioned.fill(
       child: Material(
@@ -1013,12 +1197,22 @@ class _MapOverlay extends StatelessWidget {
                       confidence: aiConfidence,
                     ),
                   ],
+                  if (submitted && vsPlayer) ...<Widget>[
+                    const SizedBox(height: 8),
+                    _PlayerVersusStrip(
+                      opponentName: opponentName,
+                      waiting: !duelOpponentSubmitted,
+                      opponentScore: duelOpponentScore,
+                      opponentDistanceKm: duelOpponentDistanceKm,
+                      playerScore: result?.score ?? 0,
+                    ),
+                  ],
                   const SizedBox(height: 10),
                   SizedBox(
                     height: 52,
                     child: FilledButton.icon(
                       onPressed: submitted
-                          ? onNextRound
+                          ? (vsPlayer && !duelCanAdvance ? null : onNextRound)
                           : (hasGuess ? onClose : null),
                       style: FilledButton.styleFrom(
                         backgroundColor: cs.primary,
@@ -1040,7 +1234,13 @@ class _MapOverlay extends StatelessWidget {
                       ),
                       label: Text(
                         submitted
-                            ? (isLastRound ? '查看總成績' : '下一回合')
+                            ? (vsPlayer && !duelCanAdvance
+                                ? (duelOpponentSubmitted
+                                    ? '等待對手結算…'
+                                    : '等待對手送出…')
+                                : (isLastRound
+                                    ? (vsPlayer ? '查看對戰結果' : '查看總成績')
+                                    : '下一回合'))
                             : (hasGuess ? '完成猜測' : '尚未選擇位置'),
                       ),
                     ),
@@ -1138,6 +1338,105 @@ class _GuessCoordPill extends StatelessWidget {
               color: Colors.white,
               fontSize: 13,
               fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 真人對戰：本回合對手分數與勝負。
+class _PlayerVersusStrip extends StatelessWidget {
+  const _PlayerVersusStrip({
+    required this.opponentName,
+    required this.waiting,
+    required this.opponentScore,
+    required this.opponentDistanceKm,
+    required this.playerScore,
+  });
+
+  final String opponentName;
+  final bool waiting;
+  final int? opponentScore;
+  final double? opponentDistanceKm;
+  final int playerScore;
+
+  static const Color _oppColor = Color(0xFF4D8CFF);
+
+  @override
+  Widget build(BuildContext context) {
+    if (waiting || opponentScore == null) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.78),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: _oppColor.withValues(alpha: 0.7)),
+        ),
+        child: Row(
+          children: <Widget>[
+            const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                '等待 $opponentName 送出…',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final int opp = opponentScore!;
+    final String distanceText = opponentDistanceKm == null
+        ? '—'
+        : (opponentDistanceKm! < 1
+            ? '<1 km'
+            : '${opponentDistanceKm!.toStringAsFixed(1)} km');
+    final String verdict = playerScore > opp
+        ? '你領先'
+        : playerScore < opp
+            ? '$opponentName 領先'
+            : '平手';
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.78),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _oppColor.withValues(alpha: 0.7)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Text(
+            opponentName,
+            style: const TextStyle(
+              color: _oppColor,
+              fontWeight: FontWeight.w800,
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '$distanceText · $opp 分',
+            style: const TextStyle(color: Colors.white, fontSize: 13),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            verdict,
+            style: const TextStyle(
+              color: Colors.white70,
+              fontWeight: FontWeight.w700,
             ),
           ),
         ],

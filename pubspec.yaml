@@ -15,6 +15,7 @@ dependencies:
   google_maps_flutter: ^2.5.0
   # Street View Metadata API
   http: ^1.2.0
+  web_socket_channel: ^3.0.1
   # 用 WebView 嵌 Maps JavaScript Street View，才有 GeoGuessr 那種沿路箭頭
   webview_flutter: ^4.7.0
   # BGM / 音效播放
