@@ -11,6 +11,12 @@ from app.config import (
     PASSWORD_RESET_EXPOSE_TOKEN,
 )
 from app.database import as_utc_aware, utc_now, users_collection
+from app.display_name import (
+    allocate_unique_display_name,
+    assert_display_name_available,
+    display_name_key,
+    nickname_seed,
+)
 from app.facebook_auth import (
     looks_like_jwt,
     verify_facebook_access_token,
@@ -18,6 +24,7 @@ from app.facebook_auth import (
 )
 from app.github_auth import exchange_code_for_token, fetch_github_profile
 from app.google_auth import verify_google_id_token
+from app.realtime_hub import hub
 from app.schemas import (
     AuthResponse,
     GitHubSignInRequest,
@@ -28,11 +35,13 @@ from app.schemas import (
     LoginRequest,
     RegisterRequest,
     ResetPasswordRequest,
+    UpdateProfileRequest,
     UserPublic,
 )
 from app.security import (
+    SESSION_SUPERSEDED_MESSAGE,
     create_access_token,
-    decode_user_id,
+    decode_access_token,
     generate_reset_token,
     hash_password,
     hash_reset_token,
@@ -46,19 +55,50 @@ _log = logging.getLogger("uvicorn.error")
 
 
 def _doc_to_public(doc: dict) -> UserPublic:
+    customized = doc.get("displayNameCustomized")
+    if customized is None:
+        customized = True
+    needs_setup = not bool(customized)
+    suggested = doc.get("suggestedDisplayName")
     return UserPublic(
         id=str(doc["_id"]),
         email=doc["email"],
         displayName=doc["displayName"],
         provider=doc.get("provider", "email"),
         createdAt=doc["createdAt"],
+        displayNameCustomized=bool(customized),
+        needsNicknameSetup=needs_setup,
+        suggestedDisplayName=(str(suggested) if needs_setup and suggested else None),
     )
 
 
 def _auth_response(doc: dict) -> AuthResponse:
     user = _doc_to_public(doc)
-    token = create_access_token(user.id)
+    session_version = int(doc.get("sessionVersion") or 0)
+    token = create_access_token(user.id, session_version)
     return AuthResponse(accessToken=token, tokenType="bearer", user=user)
+
+
+async def _complete_sign_in(col, doc: dict, *, new_account: bool) -> AuthResponse:
+    """新登入／註冊：建立 session，並踢掉舊連線。"""
+    user_id = doc["_id"]
+    if new_account:
+        col.update_one(
+            {"_id": user_id},
+            {"$set": {"sessionVersion": 1, "updatedAt": utc_now()}},
+        )
+    else:
+        col.update_one(
+            {"_id": user_id},
+            {"$inc": {"sessionVersion": 1}, "$set": {"updatedAt": utc_now()}},
+        )
+        await hub.disconnect_user(
+            str(user_id),
+            code=4001,
+            reason=SESSION_SUPERSEDED_MESSAGE,
+        )
+    refreshed = col.find_one({"_id": user_id}) or doc
+    return _auth_response(refreshed)
 
 
 async def get_current_user(
@@ -69,12 +109,13 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing bearer token",
         )
-    user_id = decode_user_id(credentials.credentials)
-    if not user_id:
+    claims = decode_access_token(credentials.credentials)
+    if not claims:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",
         )
+    user_id = claims["sub"]
     try:
         oid = ObjectId(user_id)
     except InvalidId:
@@ -87,6 +128,11 @@ async def get_current_user(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
+        )
+    if int(doc.get("sessionVersion") or 0) != int(claims["sv"]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=SESSION_SUPERSEDED_MESSAGE,
         )
     return doc
 
@@ -105,17 +151,21 @@ async def register(body: RegisterRequest) -> AuthResponse:
             detail="Email already registered",
         )
     now = utc_now()
+    display_name = assert_display_name_available(col, body.display_name.strip())
     doc = {
         "email": email,
-        "displayName": body.display_name.strip(),
+        "displayName": display_name,
+        "displayNameKey": display_name_key(display_name),
+        "displayNameCustomized": True,
         "provider": "email",
         "passwordHash": hash_password(body.password),
+        "sessionVersion": 1,
         "createdAt": now,
         "updatedAt": now,
     }
     result = col.insert_one(doc)
     doc["_id"] = result.inserted_id
-    return _auth_response(doc)
+    return await _complete_sign_in(col, doc, new_account=True)
 
 
 @router.post("/login", response_model=AuthResponse)
@@ -132,7 +182,7 @@ async def login(body: LoginRequest) -> AuthResponse:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="密碼錯誤，請再試一次",
         )
-    return _auth_response(doc)
+    return await _complete_sign_in(col, doc, new_account=False)
 
 
 @router.post("/google", response_model=AuthResponse)
@@ -148,21 +198,30 @@ async def google_sign_in(body: GoogleSignInRequest) -> AuthResponse:
     email = (idinfo.get("email") or "").strip().lower()
     raw_name = (idinfo.get("name") or "").strip()
     if raw_name:
-        display_name = raw_name
+        suggested_raw = raw_name
     elif email:
-        display_name = email.split("@")[0]
+        suggested_raw = email.split("@")[0]
     else:
-        display_name = "Google User"
+        suggested_raw = "GoogleUser"
 
     col = users_collection()
     doc = col.find_one({"googleId": google_id})
     now = utc_now()
+    created = False
 
     if doc is None:
+        created = True
+        suggested = nickname_seed(suggested_raw, fallback="GoogleUser")
+        display_name = allocate_unique_display_name(
+            col, suggested, fallback="GoogleUser"
+        )
         doc = {
             "googleId": google_id,
             "email": email or f"{google_id}@google.local",
             "displayName": display_name,
+            "displayNameKey": display_name_key(display_name),
+            "suggestedDisplayName": suggested,
+            "displayNameCustomized": False,
             "provider": "google",
             "createdAt": now,
             "updatedAt": now,
@@ -170,19 +229,14 @@ async def google_sign_in(body: GoogleSignInRequest) -> AuthResponse:
         result = col.insert_one(doc)
         doc["_id"] = result.inserted_id
     else:
-        col.update_one(
-            {"_id": doc["_id"]},
-            {
-                "$set": {
-                    "displayName": display_name,
-                    "email": email or doc.get("email"),
-                    "updatedAt": now,
-                }
-            },
-        )
+        updates: dict = {
+            "email": email or doc.get("email"),
+            "updatedAt": now,
+        }
+        col.update_one({"_id": doc["_id"]}, {"$set": updates})
         doc = col.find_one({"_id": doc["_id"]}) or doc
 
-    return _auth_response(doc)
+    return await _complete_sign_in(col, doc, new_account=created)
 
 
 @router.post("/github", response_model=AuthResponse)
@@ -191,20 +245,29 @@ async def github_sign_in(body: GitHubSignInRequest) -> AuthResponse:
     profile = fetch_github_profile(access_token)
 
     github_id = profile["id"]
-    display_name = profile["displayName"]
+    suggested_raw = profile.get("suggestedDisplayName") or profile["displayName"]
     email = profile.get("email")
     login = profile.get("login") or ""
 
     col = users_collection()
     doc = col.find_one({"githubId": github_id})
     now = utc_now()
+    created = False
 
     if doc is None:
+        created = True
+        suggested = nickname_seed(suggested_raw, fallback=login or "GitHubUser")
+        display_name = allocate_unique_display_name(
+            col, suggested, fallback=login or "GitHubUser"
+        )
         doc = {
             "githubId": github_id,
             "githubLogin": login,
             "email": email or f"{github_id}@github.local",
             "displayName": display_name,
+            "displayNameKey": display_name_key(display_name),
+            "suggestedDisplayName": suggested,
+            "displayNameCustomized": False,
             "provider": "github",
             "createdAt": now,
             "updatedAt": now,
@@ -213,7 +276,6 @@ async def github_sign_in(body: GitHubSignInRequest) -> AuthResponse:
         doc["_id"] = result.inserted_id
     else:
         updates: dict = {
-            "displayName": display_name,
             "githubLogin": login,
             "updatedAt": now,
         }
@@ -222,7 +284,7 @@ async def github_sign_in(body: GitHubSignInRequest) -> AuthResponse:
         col.update_one({"_id": doc["_id"]}, {"$set": updates})
         doc = col.find_one({"_id": doc["_id"]}) or doc
 
-    return _auth_response(doc)
+    return await _complete_sign_in(col, doc, new_account=created)
 
 
 @router.post("/facebook", response_model=AuthResponse)
@@ -278,21 +340,30 @@ async def facebook_sign_in(body: FacebookSignInRequest) -> AuthResponse:
         )
 
     if raw_name:
-        display_name = raw_name
+        suggested_raw = raw_name
     elif email:
-        display_name = email.split("@")[0]
+        suggested_raw = email.split("@")[0]
     else:
-        display_name = f"FB-{facebook_id[-6:]}"
+        suggested_raw = f"FB{facebook_id[-6:]}"
 
     col = users_collection()
     doc = col.find_one({"facebookId": facebook_id})
     now = utc_now()
+    created = False
 
     if doc is None:
+        created = True
+        suggested = nickname_seed(suggested_raw, fallback=f"FB{facebook_id[-6:]}")
+        display_name = allocate_unique_display_name(
+            col, suggested, fallback=f"FB{facebook_id[-6:]}"
+        )
         doc = {
             "facebookId": facebook_id,
             "email": email or f"{facebook_id}@facebook.local",
             "displayName": display_name,
+            "displayNameKey": display_name_key(display_name),
+            "suggestedDisplayName": suggested,
+            "displayNameCustomized": False,
             "provider": "facebook",
             "createdAt": now,
             "updatedAt": now,
@@ -300,24 +371,52 @@ async def facebook_sign_in(body: FacebookSignInRequest) -> AuthResponse:
         result = col.insert_one(doc)
         doc["_id"] = result.inserted_id
     else:
-        col.update_one(
-            {"_id": doc["_id"]},
-            {
-                "$set": {
-                    "displayName": display_name,
-                    **({"email": email} if email else {}),
-                    "updatedAt": now,
-                }
-            },
-        )
+        updates: dict = {"updatedAt": now}
+        if email:
+            updates["email"] = email
+        col.update_one({"_id": doc["_id"]}, {"$set": updates})
         doc = col.find_one({"_id": doc["_id"]}) or doc
 
-    return _auth_response(doc)
+    return await _complete_sign_in(col, doc, new_account=created)
 
 
 @router.get("/me", response_model=UserPublic)
 async def me(user: dict = Depends(get_current_user)) -> UserPublic:
     return _doc_to_public(user)
+
+
+@router.patch("/me/profile", response_model=UserPublic)
+async def update_profile(
+    body: UpdateProfileRequest,
+    user: dict = Depends(get_current_user),
+) -> UserPublic:
+    col = users_collection()
+    display_name = assert_display_name_available(
+        col,
+        body.display_name,
+        exclude_user_id=user["_id"],
+    )
+    now = utc_now()
+    col.update_one(
+        {"_id": user["_id"]},
+        {
+            "$set": {
+                "displayName": display_name,
+                "displayNameKey": display_name_key(display_name),
+                "displayNameCustomized": True,
+                "updatedAt": now,
+            },
+            "$unset": {"suggestedDisplayName": ""},
+        },
+    )
+    doc = col.find_one({"_id": user["_id"]})
+    if doc is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+    await hub.update_display_name(str(doc["_id"]), display_name)
+    return _doc_to_public(doc)
 
 
 @router.post("/forgot-password")

@@ -119,15 +119,18 @@ def fetch_github_profile(access_token: str) -> dict:
             pass
 
     if name:
-        display_name = name
+        suggested_name = login or name
     elif login:
-        display_name = login
+        suggested_name = login
     else:
-        display_name = f"GitHub-{github_id[-6:]}"
+        suggested_name = f"GitHub-{github_id[-6:]}"
+
+    display_name = login or name or suggested_name
 
     return {
         "id": github_id,
         "login": login,
         "displayName": display_name,
+        "suggestedDisplayName": suggested_name,
         "email": email or None,
     }

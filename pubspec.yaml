@@ -47,6 +47,7 @@ flutter:
     - assets/audio/home_bgm.mp3
     - assets/audio/tick.ogg
     - assets/audio/click.ogg
+    - assets/audio/challenge_bgm.mp3
     - assets/images/google_logo.svg
     - assets/images/github_logo.svg
 

@@ -123,6 +123,17 @@ def ensure_indexes() -> None:
         name="github_id_unique",
         partialFilterExpression={"provider": "github"},
     )
+    _backfill_display_name_keys(col)
+    col.update_many(
+        {"sessionVersion": {"$exists": False}},
+        {"$set": {"sessionVersion": 1}},
+    )
+    _ensure_named_index(
+        col,
+        [("displayNameKey", ASCENDING)],
+        name="display_name_key_unique",
+        unique=True,
+    )
 
     lb = leaderboard_collection()
     if LEADERBOARD_CLEAR_ON_START:
@@ -165,6 +176,39 @@ def ensure_indexes() -> None:
         unique=True,
         name="memes_user_image_unique",
     )
+
+
+def _backfill_display_name_keys(col: Collection) -> None:
+    """舊資料補 displayNameKey；若撞名則替較晚建立的帳號加尾碼。"""
+    from app.display_name import allocate_unique_display_name, display_name_key
+
+    missing_key = {
+        "$or": [
+            {"displayNameKey": {"$exists": False}},
+            {"displayNameKey": None},
+        ]
+    }
+    for doc in col.find(missing_key):
+        raw_name = str(doc.get("displayName") or "Player")
+        customized = doc.get("displayNameCustomized")
+        if customized is None:
+            customized = True
+        name = allocate_unique_display_name(
+            col,
+            raw_name,
+            exclude_user_id=doc["_id"],
+            fallback="Player",
+        )
+        col.update_one(
+            {"_id": doc["_id"]},
+            {
+                "$set": {
+                    "displayName": name,
+                    "displayNameKey": display_name_key(name),
+                    "displayNameCustomized": bool(customized),
+                }
+            },
+        )
 
 
 def utc_now() -> datetime:

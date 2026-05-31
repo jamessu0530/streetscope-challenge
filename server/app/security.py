@@ -7,6 +7,8 @@ from jose import JWTError, jwt
 
 from app.config import JWT_ALGORITHM, JWT_EXPIRE_DAYS, JWT_SECRET
 
+SESSION_SUPERSEDED_MESSAGE = "帳號已在其他裝置登入，請重新登入"
+
 
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
@@ -19,9 +21,9 @@ def verify_password(plain: str, hashed: str) -> bool:
         return False
 
 
-def create_access_token(user_id: str) -> str:
+def create_access_token(user_id: str, session_version: int) -> str:
     expire = datetime.now(timezone.utc) + timedelta(days=JWT_EXPIRE_DAYS)
-    payload = {"sub": user_id, "exp": expire}
+    payload = {"sub": user_id, "exp": expire, "sv": int(session_version)}
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
@@ -39,10 +41,18 @@ def verify_reset_token(plain: str, hashed: str) -> bool:
     return hash_reset_token(plain) == hashed
 
 
-def decode_user_id(token: str) -> str | None:
+def decode_access_token(token: str) -> dict | None:
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         sub = payload.get("sub")
-        return sub if isinstance(sub, str) else None
+        if not isinstance(sub, str) or not sub:
+            return None
+        sv = payload.get("sv")
+        return {"sub": sub, "sv": int(sv) if sv is not None else 0}
     except JWTError:
         return None
+
+
+def decode_user_id(token: str) -> str | None:
+    claims = decode_access_token(token)
+    return claims["sub"] if claims else None

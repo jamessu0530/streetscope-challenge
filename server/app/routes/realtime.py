@@ -8,21 +8,27 @@ from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from app.database import users_collection
 from app.duel_manager import duel_manager
 from app.realtime_hub import hub
-from app.security import decode_user_id
+from app.security import SESSION_SUPERSEDED_MESSAGE, decode_access_token
 
 router = APIRouter(tags=["realtime"])
 _log = logging.getLogger("uvicorn.error")
 
 
-def _user_from_token(token: str) -> dict | None:
-    user_id = decode_user_id(token.strip())
-    if not user_id:
-        return None
+def _user_from_token(token: str) -> tuple[dict | None, str | None]:
+    claims = decode_access_token(token.strip())
+    if not claims:
+        return None, None
+    user_id = claims["sub"]
     try:
         oid = ObjectId(user_id)
     except InvalidId:
-        return None
-    return users_collection().find_one({"_id": oid})
+        return None, None
+    doc = users_collection().find_one({"_id": oid})
+    if doc is None:
+        return None, None
+    if int(doc.get("sessionVersion") or 0) != int(claims["sv"]):
+        return None, SESSION_SUPERSEDED_MESSAGE
+    return doc, None
 
 
 @router.websocket("/ws")
@@ -30,9 +36,12 @@ async def websocket_lobby(
     websocket: WebSocket,
     token: str = Query(default=""),
 ) -> None:
-    doc = _user_from_token(token)
+    doc, reject_reason = _user_from_token(token)
     if doc is None:
-        await websocket.close(code=1008, reason="Unauthorized")
+        await websocket.close(
+            code=4001 if reject_reason else 1008,
+            reason=reject_reason or "Unauthorized",
+        )
         return
 
     user_id = str(doc["_id"])

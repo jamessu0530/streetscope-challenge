@@ -11,6 +11,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 class GuessMap extends StatefulWidget {
   final ValueChanged<LatLng> onGuessChanged;
+  final ValueChanged<LatLng>? onGuessDragEnd;
   final ValueChanged<GoogleMapController>? onMapCreated;
   final bool locked;
   final LatLng? guessedLocation;
@@ -19,8 +20,8 @@ class GuessMap extends StatefulWidget {
   /// AI 對手的猜測位置（送出後才會顯示）。
   final LatLng? aiLocation;
 
-  /// 娛樂模式：AI 道具建議點（僅參考，玩家可自行選點）。
-  final LatLng? aiHintLocation;
+  /// 娛樂模式：猜測點是否仍顯示 AI 建議的橘色樣式（拖移後改為藍色）。
+  final bool aiSuggestedGuess;
 
   /// 外層圓角。全螢幕地圖 overlay 會傳 0 避免四角留白。
   final double cornerRadius;
@@ -36,7 +37,8 @@ class GuessMap extends StatefulWidget {
     this.guessedLocation,
     this.correctLocation,
     this.aiLocation,
-    this.aiHintLocation,
+    this.aiSuggestedGuess = false,
+    this.onGuessDragEnd,
     this.cornerRadius = 12,
     this.bottomInset = 16,
   });
@@ -73,15 +75,24 @@ class _GuessMapState extends State<GuessMap> {
     final Set<Polyline> polylines = <Polyline>{};
 
     if (widget.guessedLocation != null) {
+      final bool showAsAiSuggested =
+          !widget.locked && widget.aiSuggestedGuess;
       markers.add(
         Marker(
           markerId: const MarkerId('guess'),
           position: widget.guessedLocation!,
           draggable: !widget.locked,
-          onDragEnd: widget.locked ? null : widget.onGuessChanged,
-          icon:
-              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-          infoWindow: const InfoWindow(title: '你的猜測'),
+          onDragEnd: widget.locked
+              ? null
+              : (widget.onGuessDragEnd ?? widget.onGuessChanged),
+          icon: BitmapDescriptor.defaultMarkerWithHue(
+            showAsAiSuggested
+                ? BitmapDescriptor.hueOrange
+                : BitmapDescriptor.hueAzure,
+          ),
+          infoWindow: InfoWindow(
+            title: showAsAiSuggested ? 'AI 建議' : '你的猜測',
+          ),
         ),
       );
     }
@@ -133,31 +144,6 @@ class _GuessMapState extends State<GuessMap> {
       );
     }
 
-    if (!widget.locked && widget.aiHintLocation != null) {
-      markers.add(
-        Marker(
-          markerId: const MarkerId('ai_hint'),
-          position: widget.aiHintLocation!,
-          icon: BitmapDescriptor.defaultMarkerWithHue(
-            BitmapDescriptor.hueOrange,
-          ),
-          infoWindow: const InfoWindow(title: 'AI 建議'),
-        ),
-      );
-      if (widget.guessedLocation != null) {
-        polylines.add(
-          Polyline(
-            polylineId: const PolylineId('guess_to_ai_hint'),
-            color: const Color(0xFFFF7A1A),
-            width: 2,
-            points: <LatLng>[
-              widget.guessedLocation!,
-              widget.aiHintLocation!,
-            ],
-          ),
-        );
-      }
-    }
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(widget.cornerRadius),

@@ -42,8 +42,12 @@ class AuthService {
 
   static const String _kAccessTokenKey = 'auth_access_token_v1';
   static const String _kCurrentUserKey = 'auth_current_user_v1';
+  static const String sessionSupersededMessage =
+      '帳號已在其他裝置登入，請重新登入';
 
   final ValueNotifier<AuthUser?> currentUser = ValueNotifier<AuthUser?>(null);
+  final ValueNotifier<String?> sessionRevokedNotice =
+      ValueNotifier<String?>(null);
 
   bool _initialized = false;
   String? _accessToken;
@@ -79,6 +83,30 @@ class AuthService {
   }
 
   bool get isLoggedIn => currentUser.value != null;
+
+  static bool isSessionSupersededMessage(String message) {
+    return message.contains('其他裝置') ||
+        message.contains('SESSION_SUPERSEDED');
+  }
+
+  /// 401 且 session 被新登入取代時，清本機登入並通知 UI。
+  Future<bool> handleUnauthorizedResponse(http.Response response) async {
+    if (response.statusCode != 401) return false;
+    final String message = _errorMessage(response);
+    if (!isSessionSupersededMessage(message)) return false;
+    sessionRevokedNotice.value = sessionSupersededMessage;
+    await signOut();
+    return true;
+  }
+
+  /// 確認 token 仍有效；被踢下線時會清 session。
+  Future<void> ensureSessionStillValid() async {
+    if (!isLoggedIn || _accessToken == null || _accessToken!.isEmpty) {
+      return;
+    }
+    if (!hasApi) return;
+    await _fetchMe(_accessToken!);
+  }
 
   /// 註冊成功後會直接寫入 JWT 並登入（與 Google / GitHub 相同）。
   Future<AuthUser> registerWithEmail({
@@ -341,6 +369,50 @@ class AuthService {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return;
     }
+    if (await handleUnauthorizedResponse(response)) {
+      throw AuthException(sessionSupersededMessage);
+    }
+    throw AuthException(_errorMessage(response));
+  }
+
+  /// 更新全站唯一遊戲暱稱。
+  Future<AuthUser> updateDisplayName(String displayName) async {
+    final AuthUser? user = currentUser.value;
+    if (user == null) {
+      throw AuthException('請先登入');
+    }
+    final String? token = _accessToken;
+    if (token == null || token.isEmpty) {
+      throw AuthException('請先登入');
+    }
+    if (!hasApi) {
+      throw AuthException('請在 .env 設定 API_BASE_URL');
+    }
+
+    final http.Response response = await http
+        .patch(
+          _uri('/auth/me/profile'),
+          headers: <String, String>{
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
+          body: jsonEncode(<String, String>{
+            'displayName': displayName.trim(),
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      final Map<String, dynamic> data = _decodeJson(response.body);
+      final AuthUser updated = AuthUser.fromApiJson(data);
+      currentUser.value = updated;
+      await _persistUserOnly(updated);
+      unawaited(RealtimeService.instance.connect());
+      return updated;
+    }
+    if (await handleUnauthorizedResponse(response)) {
+      throw AuthException(sessionSupersededMessage);
+    }
     throw AuthException(_errorMessage(response));
   }
 
@@ -376,6 +448,9 @@ class AuthService {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       final Map<String, dynamic> data = _decodeJson(response.body);
       return AuthUser.fromApiJson(data);
+    }
+    if (await handleUnauthorizedResponse(response)) {
+      throw AuthException(sessionSupersededMessage);
     }
     throw AuthException(_errorMessage(response));
   }
@@ -417,13 +492,15 @@ class AuthService {
 
   String _errorMessage(http.Response response) {
     try {
-      final Map<String, dynamic> data = _decodeJson(response.body);
-      final dynamic detail = data['detail'];
-      if (detail is String && detail.isNotEmpty) return detail;
-      if (detail is List && detail.isNotEmpty) {
-        final dynamic first = detail.first;
-        if (first is Map && first['msg'] != null) {
-          return first['msg'].toString();
+      final dynamic decoded = jsonDecode(response.body);
+      if (decoded is Map<String, dynamic>) {
+        final dynamic detail = decoded['detail'];
+        if (detail is String && detail.isNotEmpty) return detail;
+        if (detail is List && detail.isNotEmpty) {
+          final dynamic first = detail.first;
+          if (first is Map && first['msg'] != null) {
+            return first['msg'].toString();
+          }
         }
       }
     } catch (_) {

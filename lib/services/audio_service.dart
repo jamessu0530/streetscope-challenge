@@ -15,6 +15,7 @@
 //   - assets/audio/lofi_bgm.mp3   （Purrple Cat - Equinox，chosic）
 //   - assets/audio/tick.ogg       （Google Actions Sound Library CC-BY）
 //   - assets/audio/click.ogg      （Google Actions Sound Library CC-BY，cartoon pop）
+//   - assets/audio/challenge_bgm.mp3 （SoundHelix Song 8 片段，soundhelix.com 免費使用）
 // =============================================================================
 
 import 'dart:async';
@@ -33,6 +34,7 @@ class AudioService {
   static const String _gameBgmAsset = 'audio/lofi_bgm.mp3';
   static const String _tickAsset = 'audio/tick.ogg';
   static const String _clickAsset = 'audio/click.ogg';
+  static const String _challengeAsset = 'audio/challenge_bgm.mp3';
 
   static const double _homePeakVolume = 0.35;
   static const double _calmPeakVolume = 0.25;
@@ -53,6 +55,8 @@ class AudioService {
   final AudioPlayer _sfxPlayer = AudioPlayer(playerId: 'sfx')
     ..setReleaseMode(ReleaseMode.release);
   final AudioPlayer _clickPlayer = AudioPlayer(playerId: 'click')
+    ..setReleaseMode(ReleaseMode.release);
+  final AudioPlayer _challengePlayer = AudioPlayer(playerId: 'challenge')
     ..setReleaseMode(ReleaseMode.release);
 
   bool _homePlaying = false;
@@ -454,6 +458,16 @@ class AudioService {
       await _clickPlayer.play(AssetSource(_clickAsset));
     } catch (e) {
       if (kDebugMode) debugPrint('Click play error: $e');
+    }
+  }
+
+  Future<void> playChallengeFanfare() async {
+    try {
+      await _challengePlayer.stop();
+      await _challengePlayer.setVolume(0.7);
+      await _challengePlayer.play(AssetSource(_challengeAsset));
+    } catch (e) {
+      if (kDebugMode) debugPrint('Challenge fanfare play error: $e');
     }
   }
 }

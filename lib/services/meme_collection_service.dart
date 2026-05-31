@@ -92,6 +92,9 @@ class MemeCollectionService {
           .map(CollectedMeme.fromApiJson)
           .toList();
     }
+    if (await AuthService.instance.handleUnauthorizedResponse(response)) {
+      throw MemeCollectionException(AuthService.sessionSupersededMessage);
+    }
     throw MemeCollectionException(_errorMessage(response));
   }
 
@@ -126,6 +129,9 @@ class MemeCollectionService {
     ).timeout(const Duration(seconds: 15));
 
     if (response.statusCode != 204 && response.statusCode != 200) {
+      if (await AuthService.instance.handleUnauthorizedResponse(response)) {
+        throw MemeCollectionException(AuthService.sessionSupersededMessage);
+      }
       throw MemeCollectionException(_errorMessage(response));
     }
   }

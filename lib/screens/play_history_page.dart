@@ -8,6 +8,7 @@ import '../services/auth_service.dart';
 import '../services/play_history_service.dart';
 import '../widgets/matchday_ui.dart';
 import 'login_page.dart';
+import 'play_history_detail_page.dart';
 
 class PlayHistoryPage extends StatefulWidget {
   const PlayHistoryPage({super.key});
@@ -103,75 +104,119 @@ class _PlayHistoryPageState extends State<PlayHistoryPage> {
   }
 
   Widget _buildBody() {
-    if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+    if (_loading && _entries.isEmpty) {
+      return const Center(
+        child: ApiLoadingBar(label: '載入遊玩紀錄…'),
+      );
     }
     if (_error != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Text(
-                _error!,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: MatchdayPalette.ink.withValues(alpha: 0.7),
-                  fontWeight: FontWeight.w600,
-                ),
+      return RefreshIndicator(
+        onRefresh: _load,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: <Widget>[
+            SizedBox(height: MediaQuery.sizeOf(context).height * 0.25),
+            Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Text(
+                    _error!,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: MatchdayPalette.ink.withValues(alpha: 0.7),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  if (!AuthService.instance.isLoggedIn)
+                    FilledButton(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute<void>(
+                            builder: (BuildContext context) =>
+                                const LoginPage(),
+                          ),
+                        );
+                      },
+                      child: const Text('前往登入'),
+                    )
+                  else
+                    OutlinedButton(
+                      onPressed: _load,
+                      child: const Text('重試'),
+                    ),
+                ],
               ),
-              const SizedBox(height: 16),
-              if (!AuthService.instance.isLoggedIn)
-                FilledButton(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute<void>(
-                        builder: (BuildContext context) => const LoginPage(),
-                      ),
-                    );
-                  },
-                  child: const Text('前往登入'),
-                )
-              else
-                OutlinedButton(
-                  onPressed: _load,
-                  child: const Text('重試'),
-                ),
-            ],
-          ),
+            ),
+          ],
         ),
       );
     }
     if (_entries.isEmpty) {
-      return Center(
-        child: Text(
-          '尚無紀錄\n完成一局後會自動記錄',
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            color: MatchdayPalette.ink.withValues(alpha: 0.55),
-            fontWeight: FontWeight.w600,
-            height: 1.4,
-          ),
+      return RefreshIndicator(
+        onRefresh: _load,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: <Widget>[
+            SizedBox(height: MediaQuery.sizeOf(context).height * 0.28),
+            Center(
+              child: Text(
+                '尚無紀錄\n完成一局後會自動記錄',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: MatchdayPalette.ink.withValues(alpha: 0.55),
+                  fontWeight: FontWeight.w600,
+                  height: 1.4,
+                ),
+              ),
+            ),
+          ],
         ),
       );
     }
 
-    return RefreshIndicator(
-      onRefresh: _load,
-      child: ListView.separated(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-        itemCount: _entries.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 10),
-        itemBuilder: (BuildContext context, int index) {
-          return _HistoryCard(
-            entry: _entries[index],
-            whenLabel: _formatWhen(_entries[index].playedAt),
-          );
-        },
-      ),
+    return Column(
+      children: <Widget>[
+        if (_loading)
+          const LinearProgressIndicator(
+            color: MatchdayPalette.ink,
+            backgroundColor: Color(0xFFE8E4DC),
+            minHeight: 3,
+          ),
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: _load,
+            child: ListView.separated(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+              itemCount: _entries.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 10),
+              itemBuilder: (BuildContext context, int index) {
+                final PlayHistoryEntry entry = _entries[index];
+                return _HistoryCard(
+                  entry: entry,
+                  whenLabel: _formatWhen(entry.playedAt),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (BuildContext context) =>
+                            PlayHistoryDetailPage(
+                          entry: entry,
+                          whenLabel: _formatWhen(entry.playedAt),
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -180,10 +225,12 @@ class _HistoryCard extends StatelessWidget {
   const _HistoryCard({
     required this.entry,
     required this.whenLabel,
+    required this.onTap,
   });
 
   final PlayHistoryEntry entry;
   final String whenLabel;
+  final VoidCallback onTap;
 
   Color get _typeColor {
     switch (entry.playType) {
@@ -199,16 +246,20 @@ class _HistoryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final String? outcome = entry.outcomeLabel;
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: MatchdayPalette.cream,
+    return Material(
+      color: MatchdayPalette.cream,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: MatchdayPalette.ink, width: 2),
+        side: const BorderSide(color: MatchdayPalette.ink, width: 2),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
           Row(
             children: <Widget>[
               Container(
@@ -319,7 +370,27 @@ class _HistoryCard extends StatelessWidget {
               color: MatchdayPalette.ink.withValues(alpha: 0.55),
             ),
           ),
-        ],
+          const SizedBox(height: 4),
+          Row(
+            children: <Widget>[
+              Text(
+                '查看詳情',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  color: MatchdayPalette.ink.withValues(alpha: 0.45),
+                ),
+              ),
+              Icon(
+                Icons.chevron_right,
+                size: 16,
+                color: MatchdayPalette.ink.withValues(alpha: 0.45),
+              ),
+            ],
+          ),
+            ],
+          ),
+        ),
       ),
     );
   }

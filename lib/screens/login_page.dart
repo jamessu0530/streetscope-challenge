@@ -8,8 +8,10 @@ import 'package:flutter_svg/flutter_svg.dart';
 import '../models/auth_user.dart';
 import '../services/audio_service.dart';
 import '../services/auth_service.dart';
+import '../utils/nickname_utils.dart';
 import '../widgets/matchday_ui.dart';
 import 'forgot_password_page.dart';
+import 'nickname_page.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -48,10 +50,24 @@ class _LoginPageState extends State<LoginPage> {
     try {
       final AuthUser user = await action();
       if (!mounted) return;
+      if (user.needsNicknameSetup) {
+        final bool ready = await ensureNicknameSetup(context);
+        if (!mounted) return;
+        if (!ready) {
+          await AuthService.instance.signOut();
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('請完成遊戲暱稱設定後再登入')),
+          );
+          return;
+        }
+      }
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            successMessage?.call(user) ?? '歡迎，${user.displayName}',
+            successMessage?.call(AuthService.instance.currentUser.value ?? user) ??
+                '歡迎，${(AuthService.instance.currentUser.value ?? user).displayName}',
           ),
           duration: const Duration(seconds: 2),
         ),
@@ -519,13 +535,10 @@ class _EmailFormCard extends StatelessWidget {
                 if (isRegister) ...<Widget>[
                   _PlainInput(
                     controller: nameCtrl,
-                    hint: '顯示名稱（會出現在排行榜）',
+                    hint: '遊戲暱稱（全站唯一，2～32 字）',
                     textInputAction: TextInputAction.next,
                     enabled: !anyBusy,
-                    validator: (String? v) {
-                      if ((v ?? '').trim().isEmpty) return '請輸入顯示名稱';
-                      return null;
-                    },
+                    validator: NicknameUtils.validate,
                   ),
                   const SizedBox(height: 10),
                 ],

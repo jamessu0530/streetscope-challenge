@@ -13,7 +13,9 @@ import '../models/leaderboard_entry.dart';
 import '../services/auth_service.dart';
 import '../services/leaderboard_service.dart';
 import 'login_page.dart';
+import 'leaderboard_detail_page.dart';
 import '../widgets/floating_home_nav_bar.dart';
+import '../widgets/matchday_ui.dart';
 
 class LeaderboardPage extends StatefulWidget {
   /// 剛結束一局時傳入，用於高亮該筆雲端紀錄。
@@ -85,6 +87,11 @@ class _LeaderboardPageState extends State<LeaderboardPage>
       });
       return;
     }
+
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
 
     try {
       final List<LeaderboardEntry> all =
@@ -177,23 +184,24 @@ class _LeaderboardPageState extends State<LeaderboardPage>
       ),
       child: Scaffold(
         backgroundColor: _bg,
+        resizeToAvoidBottomInset: false,
         body: Stack(
           children: <Widget>[
-            SafeArea(
-              child: _loading
-                  ? const Center(
-                      child: Text(
-                        'LOADING...',
-                        style: TextStyle(
-                          color: _dim,
-                          fontSize: 14,
-                          letterSpacing: 4,
-                          fontFamily: 'Menlo',
-                          fontFamilyFallback: _monoFallback,
+            MediaQuery.removeViewInsets(
+              removeBottom: true,
+              context: context,
+              child: SafeArea(
+                bottom: false,
+                child: _loading && _all.isEmpty
+                    ? const Center(
+                        child: ApiLoadingBar(
+                          label: 'LOADING SCORES…',
+                          color: _accent,
+                          backgroundColor: Color(0xFF333333),
                         ),
-                      ),
-                    )
-                  : _buildBody(),
+                      )
+                    : _buildBody(),
+              ),
             ),
             const Positioned.fill(
               child: IgnorePointer(
@@ -210,24 +218,36 @@ class _LeaderboardPageState extends State<LeaderboardPage>
   Widget _buildBody() {
     return Column(
       children: <Widget>[
-        _buildTopBar(),
-        const SizedBox(height: 8),
-        _buildTitle(),
-        const SizedBox(height: 8),
-        _buildTabs(),
-        const SizedBox(height: 8),
-        _buildFilters(),
-        const SizedBox(height: 10),
-        _buildColumnHeaders(),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 18),
-          child: Container(
-            height: 1,
-            color: _dim.withValues(alpha: 0.4),
+        if (_loading && _all.isNotEmpty)
+          const LinearProgressIndicator(
+            color: _accent,
+            backgroundColor: Color(0xFF333333),
+            minHeight: 3,
+          ),
+        Expanded(
+          child: Column(
+            children: <Widget>[
+              _buildTopBar(),
+              const SizedBox(height: 8),
+              _buildTitle(),
+              const SizedBox(height: 8),
+              _buildTabs(),
+              const SizedBox(height: 8),
+              _buildFilters(),
+              const SizedBox(height: 10),
+              _buildColumnHeaders(),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 18),
+                child: Container(
+                  height: 1,
+                  color: _dim.withValues(alpha: 0.4),
+                ),
+              ),
+              Expanded(child: _buildList()),
+              _buildFooter(),
+            ],
           ),
         ),
-        Expanded(child: _buildList()),
-        _buildFooter(),
       ],
     );
   }
@@ -470,16 +490,77 @@ class _LeaderboardPageState extends State<LeaderboardPage>
 
   Widget _buildList() {
     if (_error != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Text(
-                _error!.toUpperCase(),
+      return RefreshIndicator(
+        color: _accent,
+        backgroundColor: _bg,
+        onRefresh: _load,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: <Widget>[
+            const SizedBox(height: 48),
+            Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Text(
+                    _error!.toUpperCase(),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: _dim,
+                      fontSize: 12,
+                      height: 1.8,
+                      letterSpacing: 2,
+                      fontFamily: 'Menlo',
+                      fontFamilyFallback: _monoFallback,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  if (!AuthService.instance.isLoggedIn) ...<Widget>[
+                    const SizedBox(height: 16),
+                    OutlinedButton(
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (BuildContext _) => const LoginPage(),
+                          ),
+                        );
+                      },
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: _accent,
+                        side: const BorderSide(color: _accent),
+                      ),
+                      child: const Text(
+                        '前往登入',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 2,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    if (_rows.isEmpty) {
+      return RefreshIndicator(
+        color: _accent,
+        backgroundColor: _bg,
+        onRefresh: _load,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: const <Widget>[
+            SizedBox(height: 48),
+            Padding(
+              padding: EdgeInsets.all(24),
+              child: Text(
+                'NO RECORDS.\nPLAY A ROUND.',
                 textAlign: TextAlign.center,
-                style: const TextStyle(
+                style: TextStyle(
                   color: _dim,
                   fontSize: 12,
                   height: 1.8,
@@ -489,75 +570,50 @@ class _LeaderboardPageState extends State<LeaderboardPage>
                   fontWeight: FontWeight.w700,
                 ),
               ),
-              if (!AuthService.instance.isLoggedIn) ...<Widget>[
-                const SizedBox(height: 16),
-                OutlinedButton(
-                  onPressed: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (BuildContext _) => const LoginPage(),
-                      ),
-                    );
-                  },
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: _accent,
-                    side: const BorderSide(color: _accent),
-                  ),
-                  child: const Text(
-                    '前往登入',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 2,
-                    ),
+            ),
+          ],
+        ),
+      );
+    }
+    return RefreshIndicator(
+      color: _accent,
+      backgroundColor: _bg,
+      onRefresh: _load,
+      child: ListView.builder(
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: BouncingScrollPhysics(),
+        ),
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        itemCount: _rows.length,
+        itemBuilder: (BuildContext context, int index) {
+          final LeaderboardEntry e = _rows[index];
+          final bool isCurrent =
+              _highlightEntryId != null && e.id == _highlightEntryId;
+          return _ScoreRow(
+            index: index,
+            entry: e,
+            isCurrent: isCurrent,
+            countCtrl: _countCtrl,
+            blinkCtrl: _blinkCtrl,
+            monoFallback: _monoFallback,
+            ink: _ink,
+            dim: _dim,
+            accent: _accent,
+            green: _green,
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (BuildContext context) => LeaderboardDetailPage(
+                    entry: e,
+                    rank: index + 1,
                   ),
                 ),
-              ],
-            ],
-          ),
-        ),
-      );
-    }
-    if (_rows.isEmpty) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(24),
-          child: Text(
-            'NO RECORDS.\nPLAY A ROUND.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: _dim,
-              fontSize: 12,
-              height: 1.8,
-              letterSpacing: 2,
-              fontFamily: 'Menlo',
-              fontFamilyFallback: _monoFallback,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-      );
-    }
-    return ListView.builder(
-      physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      itemCount: _rows.length,
-      itemBuilder: (BuildContext context, int index) {
-        final LeaderboardEntry e = _rows[index];
-        final bool isCurrent =
-            _highlightEntryId != null && e.id == _highlightEntryId;
-        return _ScoreRow(
-          index: index,
-          entry: e,
-          isCurrent: isCurrent,
-          countCtrl: _countCtrl,
-          blinkCtrl: _blinkCtrl,
-          monoFallback: _monoFallback,
-          ink: _ink,
-          dim: _dim,
-          accent: _accent,
-          green: _green,
-        );
-      },
+              );
+            },
+          );
+        },
+      ),
     );
   }
 
@@ -633,6 +689,7 @@ class _ScoreRow extends StatelessWidget {
   final Color dim;
   final Color accent;
   final Color green;
+  final VoidCallback? onTap;
 
   const _ScoreRow({
     required this.index,
@@ -645,6 +702,7 @@ class _ScoreRow extends StatelessWidget {
     required this.dim,
     required this.accent,
     required this.green,
+    this.onTap,
   });
 
   @override
@@ -737,9 +795,16 @@ class _ScoreRow extends StatelessWidget {
           ),
         );
 
-        return Opacity(
+        final Widget row = Opacity(
           opacity: opacity,
           child: content,
+        );
+
+        if (onTap == null) return row;
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onTap,
+          child: row,
         );
       },
     );

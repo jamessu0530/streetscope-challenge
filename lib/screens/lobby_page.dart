@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import '../data/game_constants.dart';
 import '../models/auth_user.dart';
 import '../models/game_mode.dart';
+import '../models/game_region.dart';
 import '../models/game_settings.dart';
 import '../models/online_player.dart';
 import '../services/audio_service.dart';
@@ -16,20 +17,34 @@ import '../services/auth_service.dart';
 import '../services/realtime_service.dart';
 import '../widgets/floating_home_nav_bar.dart';
 import '../widgets/matchday_ui.dart';
+import 'login_page.dart';
+import 'nickname_page.dart';
 
 class LobbyPage extends StatefulWidget {
-  const LobbyPage({super.key, required this.lobbySettings});
-
-  /// 首頁設定的回合／時間／區域；發起挑戰時可再選模式。
-  final GameSettings lobbySettings;
+  const LobbyPage({super.key});
 
   @override
   State<LobbyPage> createState() => _LobbyPageState();
 }
 
 class _LobbyPageState extends State<LobbyPage> {
+  static const Color _entertainmentOrange = Color(0xFFFF7A1A);
+
   final TextEditingController _chatController = TextEditingController();
   final ScrollController _chatScroll = ScrollController();
+
+  GameRegion _region = GameRegion.world;
+  int _secondsPerRound = kSecondsPerRound;
+  int _roundsPerGame = kRoundsPerGame;
+  int _maxMoveSteps = 0;
+  bool _entertainmentMode = false;
+
+  GameSettings get _lobbySettings => GameSettings(
+        region: _region,
+        secondsPerRound: _secondsPerRound,
+        roundsPerGame: _roundsPerGame,
+        maxMoveSteps: _maxMoveSteps,
+      );
 
   @override
   void initState() {
@@ -38,6 +53,10 @@ class _LobbyPageState extends State<LobbyPage> {
       unawaited(RealtimeService.instance.connect());
     }
     RealtimeService.instance.chatMessages.addListener(_scrollChatToEnd);
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await ensureNicknameSetup(context);
+    });
   }
 
   @override
@@ -68,96 +87,47 @@ class _LobbyPageState extends State<LobbyPage> {
   }
 
   GameSettings _duelSettingsForMode(GameMode mode, {required bool entertainment}) {
-    int seconds = widget.lobbySettings.secondsPerRound;
+    int seconds = _lobbySettings.secondsPerRound;
     if (entertainment && seconds < kMinSecondsPerRoundEntertainment) {
       seconds = kMinSecondsPerRoundEntertainment;
     }
-    return widget.lobbySettings.copyWith(
+    return _lobbySettings.copyWith(
       mode: mode,
       vsAi: false,
       vsPlayer: true,
       entertainmentMode: entertainment,
       secondsPerRound: seconds,
-      maxMoveSteps: mode == GameMode.move ? widget.lobbySettings.maxMoveSteps : 0,
+      maxMoveSteps: mode == GameMode.move ? _lobbySettings.maxMoveSteps : 0,
     );
   }
 
   Future<void> _challengePlayer(OnlinePlayer target) async {
     AudioService.instance.playClick();
     GameMode selectedMode = GameMode.picture;
-    bool entertainmentMode = false;
 
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext dialogContext) {
         return StatefulBuilder(
           builder: (BuildContext context, StateSetter setDialogState) {
-            final GameSettings preview = _duelSettingsForMode(
-              selectedMode,
-              entertainment: entertainmentMode,
-            );
-            final String moveHint = selectedMode == GameMode.move &&
-                    preview.maxMoveSteps > 0
-                ? '\n最多 ${preview.maxMoveSteps} 步'
-                : '';
-
             return AlertDialog(
               title: const Text('發起挑戰'),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Text('向 ${target.displayName} 發送對戰邀請？'),
-                    const SizedBox(height: 12),
-                    const Text(
-                      '遊戲模式',
-                      style: TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    for (final GameMode mode in GameMode.values)
-                      RadioListTile<GameMode>(
-                        value: mode,
-                        groupValue: selectedMode,
-                        onChanged: (GameMode? value) {
-                          if (value == null) return;
-                          setDialogState(() => selectedMode = value);
-                        },
-                        title: Text(mode.label),
-                        subtitle: Text(
-                          mode.description,
-                          style: const TextStyle(fontSize: 11),
-                        ),
-                        contentPadding: EdgeInsets.zero,
-                        dense: true,
-                      ),
-                    const SizedBox(height: 8),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text(
-                        '娛樂模式',
-                        style: TextStyle(fontWeight: FontWeight.w800),
-                      ),
-                      subtitle: const Text(
-                        '每回合 AI 建議（使用後該回合分數折半）\n'
-                        '至少 ${kMinSecondsPerRoundEntertainment} 秒 · 不計排行榜',
-                        style: TextStyle(fontSize: 11, height: 1.35),
-                      ),
-                      value: entertainmentMode,
-                      onChanged: (bool value) {
-                        setDialogState(() => entertainmentMode = value);
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  for (final GameMode mode in GameMode.values)
+                    RadioListTile<GameMode>(
+                      value: mode,
+                      groupValue: selectedMode,
+                      onChanged: (GameMode? value) {
+                        if (value == null) return;
+                        setDialogState(() => selectedMode = value);
                       },
+                      title: Text(_challengeModeLabel(mode)),
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${preview.roundsPerGame} 回合 · '
-                      '${preview.secondsPerRound} 秒$moveHint',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: MatchdayPalette.ink.withValues(alpha: 0.65),
-                      ),
-                    ),
-                  ],
-                ),
+                ],
               ),
               actions: <Widget>[
                 TextButton(
@@ -175,13 +145,195 @@ class _LobbyPageState extends State<LobbyPage> {
       },
     );
     if (ok != true) return;
+    unawaited(AudioService.instance.playChallengeFanfare());
     RealtimeService.instance.sendDuelInvite(
       toUserId: target.id,
       settings: _duelSettingsForMode(
         selectedMode,
-        entertainment: entertainmentMode,
+        entertainment: _entertainmentMode,
       ),
     );
+  }
+
+  String _challengeModeLabel(GameMode mode) {
+    switch (mode) {
+      case GameMode.move:
+        return 'Move';
+      case GameMode.noMove:
+        return 'No Move';
+      case GameMode.picture:
+        return 'Picture';
+    }
+  }
+
+  void _applyLobbySettings({
+    required GameRegion region,
+    required int rounds,
+    required int seconds,
+    required int moves,
+  }) {
+    setState(() {
+      _region = region;
+      _roundsPerGame = rounds;
+      _secondsPerRound = seconds;
+      _maxMoveSteps = moves;
+      if (_entertainmentMode &&
+          _secondsPerRound < kMinSecondsPerRoundEntertainment) {
+        _secondsPerRound = kMinSecondsPerRoundEntertainment;
+      }
+    });
+  }
+
+  Future<void> _editDuelSetup() async {
+    AudioService.instance.playClick();
+    GameRegion region = _region;
+    int rounds = _roundsPerGame;
+    int seconds = _secondsPerRound;
+    int moves = _maxMoveSteps;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: MatchdayPalette.cream,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (BuildContext sheetContext) {
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setSheetState) {
+            void syncSettings() {
+              _applyLobbySettings(
+                region: region,
+                rounds: rounds,
+                seconds: seconds,
+                moves: moves,
+              );
+            }
+
+            return Padding(
+              padding: EdgeInsets.fromLTRB(
+                20,
+                16,
+                20,
+                20 + MediaQuery.paddingOf(context).bottom,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  const Text(
+                    '對戰設定',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  DropdownButtonFormField<GameRegion>(
+                    value: region,
+                    decoration: const InputDecoration(
+                      labelText: '區域',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    items: GameRegion.values
+                        .map(
+                          (GameRegion r) => DropdownMenuItem<GameRegion>(
+                            value: r,
+                            child: Text(r.label),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (GameRegion? value) {
+                      if (value == null) return;
+                      setSheetState(() => region = value);
+                      syncSettings();
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<int>(
+                    value: rounds,
+                    decoration: const InputDecoration(
+                      labelText: '回合數',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    items: kRoundsPerGameOptions
+                        .map(
+                          (int n) => DropdownMenuItem<int>(
+                            value: n,
+                            child: Text('$n 回合'),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (int? value) {
+                      if (value == null) return;
+                      setSheetState(() => rounds = value);
+                      syncSettings();
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<int>(
+                    value: seconds,
+                    decoration: const InputDecoration(
+                      labelText: '每回合秒數',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    items: List<int>.generate(
+                      (kMaxSecondsPerRound - kMinSecondsPerRound) ~/ 15 + 1,
+                      (int i) => kMinSecondsPerRound + i * 15,
+                    )
+                        .map(
+                          (int s) => DropdownMenuItem<int>(
+                            value: s,
+                            child: Text('$s 秒'),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (int? value) {
+                      if (value == null) return;
+                      setSheetState(() => seconds = value);
+                      syncSettings();
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<int>(
+                    value: moves,
+                    decoration: const InputDecoration(
+                      labelText: 'Move 模式步數上限',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    items: kMoveStepLimitOptions
+                        .map(
+                          (int n) => DropdownMenuItem<int>(
+                            value: n,
+                            child: Text(n == 0 ? '無限制' : '$n 步'),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (int? value) {
+                      if (value == null) return;
+                      setSheetState(() => moves = value);
+                      syncSettings();
+                    },
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _setEntertainmentMode(bool value) {
+    setState(() {
+      _entertainmentMode = value;
+      if (value && _secondsPerRound < kMinSecondsPerRoundEntertainment) {
+        _secondsPerRound = kMinSecondsPerRoundEntertainment;
+      }
+    });
   }
 
   @override
@@ -211,15 +363,6 @@ class _LobbyPageState extends State<LobbyPage> {
                   padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
                   child: Row(
                     children: <Widget>[
-                      IconButton(
-                        onPressed: () {
-                          AudioService.instance.playClick();
-                          Navigator.pop(context);
-                        },
-                        icon: const Icon(Icons.arrow_back),
-                        color: MatchdayPalette.ink,
-                      ),
-                      const SizedBox(width: 4),
                       const Expanded(
                         child: Text(
                           '線上大廳',
@@ -296,12 +439,84 @@ class _LobbyPageState extends State<LobbyPage> {
                   },
                 ),
                 if (!loggedIn)
-                  const Expanded(
+                  Expanded(
                     child: Center(
-                      child: Text('請先登入'),
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: <Widget>[
+                            const Text('請先登入才能使用線上大廳'),
+                            const SizedBox(height: 16),
+                            FilledButton(
+                              onPressed: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (BuildContext _) =>
+                                        const LoginPage(),
+                                  ),
+                                );
+                              },
+                              child: const Text('前往登入'),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
                   )
                 else ...<Widget>[
+                  if (!keyboardVisible)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                      child: Column(
+                        children: <Widget>[
+                          _LobbyOptionCard(
+                            icon: Icons.tune,
+                            iconColor: MatchdayPalette.ink,
+                            borderColor: MatchdayPalette.ink,
+                            backgroundColor: MatchdayPalette.cream,
+                            title: '對戰設定',
+                            subtitle:
+                                '${_lobbySettings.region.label} · '
+                                '${_lobbySettings.roundsPerGame} 回合 · '
+                                '${_lobbySettings.secondsPerRound} 秒'
+                                '${_lobbySettings.maxMoveSteps > 0 ? ' · Move ${_lobbySettings.maxMoveSteps} 步' : ''}',
+                            trailing: const Icon(
+                              Icons.edit_outlined,
+                              size: 16,
+                              color: Colors.black54,
+                            ),
+                            onTap: _editDuelSetup,
+                          ),
+                          const SizedBox(height: 8),
+                          _LobbyOptionCard(
+                            icon: Icons.auto_awesome,
+                            iconColor: _entertainmentMode
+                                ? _entertainmentOrange
+                                : MatchdayPalette.ink,
+                            borderColor: _entertainmentMode
+                                ? _entertainmentOrange
+                                : MatchdayPalette.ink,
+                            backgroundColor: _entertainmentMode
+                                ? _entertainmentOrange.withValues(alpha: 0.12)
+                                : MatchdayPalette.cream,
+                            title: '娛樂模式',
+                            titleColor: _entertainmentMode
+                                ? _entertainmentOrange
+                                : MatchdayPalette.ink,
+                            subtitle:
+                                'AI 道具 · 使用折半 · 不計排行榜 · 每回合 ≥60 秒',
+                            trailing: Switch.adaptive(
+                              value: _entertainmentMode,
+                              onChanged: _setEntertainmentMode,
+                              activeTrackColor:
+                                  _entertainmentOrange.withValues(alpha: 0.55),
+                              activeThumbColor: _entertainmentOrange,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   if (!keyboardVisible) ...<Widget>[
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -447,22 +662,57 @@ class _LobbyPageState extends State<LobbyPage> {
                       chatBottomPadding,
                     ),
                     child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: <Widget>[
                         Expanded(
-                          child: TextField(
-                            controller: _chatController,
-                            onSubmitted: (_) => _sendChat(),
-                            textInputAction: TextInputAction.send,
-                            decoration: const InputDecoration(
-                              hintText: '輸入訊息…',
-                              border: OutlineInputBorder(),
-                              isDense: true,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: MatchdayPalette.cream,
+                              borderRadius: BorderRadius.circular(28),
+                              border: Border.all(
+                                color: MatchdayPalette.ink,
+                                width: 1.5,
+                              ),
+                            ),
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 16),
+                            child: TextField(
+                              controller: _chatController,
+                              onSubmitted: (_) => _sendChat(),
+                              textInputAction: TextInputAction.send,
+                              decoration: const InputDecoration(
+                                hintText: '輸入訊息…',
+                                border: InputBorder.none,
+                                enabledBorder: InputBorder.none,
+                                focusedBorder: InputBorder.none,
+                                isDense: true,
+                                contentPadding:
+                                    EdgeInsets.symmetric(vertical: 12),
+                              ),
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: MatchdayPalette.ink,
+                              ),
                             ),
                           ),
                         ),
-                        IconButton(
-                          onPressed: _sendChat,
-                          icon: const Icon(Icons.send),
+                        const SizedBox(width: 8),
+                        Material(
+                          color: MatchdayPalette.ink,
+                          shape: const CircleBorder(),
+                          child: InkWell(
+                            customBorder: const CircleBorder(),
+                            onTap: _sendChat,
+                            child: const Padding(
+                              padding: EdgeInsets.all(10),
+                              child: Icon(
+                                Icons.send_rounded,
+                                color: Colors.white,
+                                size: 20,
+                              ),
+                            ),
+                          ),
                         ),
                       ],
                     ),
@@ -472,8 +722,94 @@ class _LobbyPageState extends State<LobbyPage> {
             ),
           ),
           if (!keyboardVisible)
-            const FloatingHomeNavBar(current: HomeTab.home),
+            const FloatingHomeNavBar(current: HomeTab.lobby),
         ],
+      ),
+    );
+  }
+}
+
+class _LobbyOptionCard extends StatelessWidget {
+  const _LobbyOptionCard({
+    required this.icon,
+    required this.iconColor,
+    required this.borderColor,
+    required this.backgroundColor,
+    required this.title,
+    required this.subtitle,
+    this.titleColor,
+    this.trailing,
+    this.onTap,
+  });
+
+  static const double _minHeight = 56;
+
+  final IconData icon;
+  final Color iconColor;
+  final Color borderColor;
+  final Color backgroundColor;
+  final String title;
+  final String subtitle;
+  final Color? titleColor;
+  final Widget? trailing;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: backgroundColor,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: borderColor, width: 1.5),
+      ),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: _minHeight),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: <Widget>[
+                Icon(icon, size: 18, color: iconColor),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        title,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w900,
+                          color: titleColor ?? MatchdayPalette.ink,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11,
+                          height: 1.3,
+                          fontWeight: FontWeight.w600,
+                          color: MatchdayPalette.ink.withValues(alpha: 0.6),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (trailing != null) ...<Widget>[
+                  const SizedBox(width: 8),
+                  trailing!,
+                ],
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

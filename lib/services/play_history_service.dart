@@ -90,6 +90,9 @@ class PlayHistoryService {
           .map(PlayHistoryEntry.fromApiJson)
           .toList();
     }
+    if (await AuthService.instance.handleUnauthorizedResponse(response)) {
+      throw PlayHistoryException(AuthService.sessionSupersededMessage);
+    }
     throw PlayHistoryException(_errorMessage(response));
   }
 
@@ -136,6 +139,9 @@ class PlayHistoryService {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       final Map<String, dynamic> data = _decodeJson(response.body);
       return data['id'] as String?;
+    }
+    if (await AuthService.instance.handleUnauthorizedResponse(response)) {
+      return null;
     }
     if (kDebugMode) {
       // ignore: avoid_print

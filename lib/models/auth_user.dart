@@ -37,6 +37,9 @@ class AuthUser {
   final String? email;
   final AuthProvider provider;
   final DateTime loggedInAt;
+  final bool displayNameCustomized;
+  final bool needsNicknameSetup;
+  final String? suggestedDisplayName;
 
   const AuthUser({
     required this.id,
@@ -44,7 +47,35 @@ class AuthUser {
     required this.email,
     required this.provider,
     required this.loggedInAt,
+    this.displayNameCustomized = true,
+    this.needsNicknameSetup = false,
+    this.suggestedDisplayName,
   });
+
+  String get nicknameSuggestion =>
+      (suggestedDisplayName != null && suggestedDisplayName!.trim().isNotEmpty)
+          ? suggestedDisplayName!.trim()
+          : displayName;
+
+  AuthUser copyWith({
+    String? displayName,
+    bool? displayNameCustomized,
+    bool? needsNicknameSetup,
+    String? suggestedDisplayName,
+  }) {
+    return AuthUser(
+      id: id,
+      displayName: displayName ?? this.displayName,
+      email: email,
+      provider: provider,
+      loggedInAt: loggedInAt,
+      displayNameCustomized:
+          displayNameCustomized ?? this.displayNameCustomized,
+      needsNicknameSetup: needsNicknameSetup ?? this.needsNicknameSetup,
+      suggestedDisplayName:
+          suggestedDisplayName ?? this.suggestedDisplayName,
+    );
+  }
 
   Map<String, dynamic> toJson() => <String, dynamic>{
         'id': id,
@@ -52,6 +83,9 @@ class AuthUser {
         'email': email,
         'provider': provider.name,
         'loggedInAt': loggedInAt.toIso8601String(),
+        'displayNameCustomized': displayNameCustomized,
+        'needsNicknameSetup': needsNicknameSetup,
+        'suggestedDisplayName': suggestedDisplayName,
       };
 
   factory AuthUser.fromJson(Map<String, dynamic> json) {
@@ -67,6 +101,10 @@ class AuthUser {
       ),
       loggedInAt: DateTime.tryParse(json['loggedInAt'] as String? ?? '') ??
           DateTime.now(),
+      displayNameCustomized:
+          json['displayNameCustomized'] as bool? ?? true,
+      needsNicknameSetup: json['needsNicknameSetup'] as bool? ?? false,
+      suggestedDisplayName: json['suggestedDisplayName'] as String?,
     );
   }
 
@@ -78,6 +116,13 @@ class AuthUser {
         json['createdAt'] as String? ?? json['created_at'] as String?;
     final String? displayName =
         json['displayName'] as String? ?? json['display_name'] as String?;
+    final bool? displayNameCustomized = json['displayNameCustomized'] as bool? ??
+        json['display_name_customized'] as bool?;
+    final bool? needsNicknameSetup = json['needsNicknameSetup'] as bool? ??
+        json['needs_nickname_setup'] as bool?;
+    final String? suggestedDisplayName =
+        json['suggestedDisplayName'] as String? ??
+            json['suggested_display_name'] as String?;
     return AuthUser(
       id: (json['id'] as String?) ?? '',
       displayName: (displayName != null && displayName.trim().isNotEmpty)
@@ -90,6 +135,9 @@ class AuthUser {
       ),
       loggedInAt:
           DateTime.tryParse(createdAt ?? '') ?? DateTime.now(),
+      displayNameCustomized: displayNameCustomized ?? true,
+      needsNicknameSetup: needsNicknameSetup ?? false,
+      suggestedDisplayName: suggestedDisplayName,
     );
   }
 

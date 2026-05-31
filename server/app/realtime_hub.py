@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from fastapi import WebSocket
 
 from app.database import utc_now
+from app.security import SESSION_SUPERSEDED_MESSAGE
 
 _log = logging.getLogger("uvicorn.error")
 
@@ -45,7 +46,10 @@ class RealtimeHub:
             previous = self._clients.get(user_id)
             if previous is not None and previous.websocket is not websocket:
                 try:
-                    await previous.websocket.close(code=1000)
+                    await previous.websocket.close(
+                        code=4001,
+                        reason=SESSION_SUPERSEDED_MESSAGE[:123],
+                    )
                 except Exception:
                     pass
             self._clients[user_id] = ConnectedClient(
@@ -61,6 +65,31 @@ class RealtimeHub:
             if current is None or current.websocket is not websocket:
                 return
             del self._clients[user_id]
+        await self._broadcast_presence()
+
+    async def disconnect_user(
+        self,
+        user_id: str,
+        *,
+        code: int = 1000,
+        reason: str = "",
+    ) -> None:
+        async with self._lock:
+            client = self._clients.pop(user_id, None)
+        if client is None:
+            return
+        try:
+            await client.websocket.close(code=code, reason=reason[:123])
+        except Exception:
+            pass
+        await self._broadcast_presence()
+
+    async def update_display_name(self, user_id: str, display_name: str) -> None:
+        async with self._lock:
+            client = self._clients.get(user_id)
+            if client is None:
+                return
+            client.display_name = display_name
         await self._broadcast_presence()
 
     async def send_presence_to(self, websocket: WebSocket) -> None:

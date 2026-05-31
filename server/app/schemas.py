@@ -1,12 +1,17 @@
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=6, max_length=128)
-    display_name: str = Field(min_length=1, max_length=32, alias="displayName")
+    display_name: str = Field(min_length=2, max_length=32, alias="displayName")
+
+    @field_validator("display_name")
+    @classmethod
+    def _strip_display_name(cls, value: str) -> str:
+        return value.strip()
 
     model_config = {"populate_by_name": True}
 
@@ -63,12 +68,28 @@ class ChangePasswordRequest(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class UpdateProfileRequest(BaseModel):
+    display_name: str = Field(min_length=2, max_length=32, alias="displayName")
+
+    model_config = {"populate_by_name": True}
+
+    @field_validator("display_name")
+    @classmethod
+    def _strip_display_name(cls, value: str) -> str:
+        return value.strip()
+
+
 class UserPublic(BaseModel):
     id: str
     email: str
     display_name: str = Field(alias="displayName")
     provider: str
     created_at: datetime = Field(alias="createdAt")
+    display_name_customized: bool = Field(default=True, alias="displayNameCustomized")
+    needs_nickname_setup: bool = Field(default=False, alias="needsNicknameSetup")
+    suggested_display_name: str | None = Field(
+        default=None, alias="suggestedDisplayName"
+    )
 
     model_config = {"populate_by_name": True}
 

@@ -24,6 +24,55 @@ class MatchdayPalette {
   static const Color accent = Color(0xFFFF3D57);
 }
 
+/// API 列表載入中（作業要求 LinearProgressIndicator）。
+class ApiLoadingBar extends StatelessWidget {
+  const ApiLoadingBar({
+    super.key,
+    this.label,
+    this.color,
+    this.backgroundColor,
+    this.padding = const EdgeInsets.symmetric(horizontal: 32),
+  });
+
+  final String? label;
+  final Color? color;
+  final Color? backgroundColor;
+  final EdgeInsets padding;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color barColor = color ?? MatchdayPalette.ink;
+    return Padding(
+      padding: padding,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          LinearProgressIndicator(
+            color: barColor,
+            backgroundColor:
+                backgroundColor ?? barColor.withValues(alpha: 0.12),
+            minHeight: 4,
+            borderRadius: BorderRadius.circular(999),
+          ),
+          if (label != null) ...<Widget>[
+            const SizedBox(height: 16),
+            Text(
+              label!,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: barColor.withValues(alpha: 0.65),
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 // =============================================================================
 // 頂部黑條 ticker：LIVE 點 + 左側文字 + 右側 trailing 文字
 // =============================================================================

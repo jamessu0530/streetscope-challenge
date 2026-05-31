@@ -86,6 +86,9 @@ class LeaderboardService {
       final Map<String, dynamic> data = _decodeJson(response.body);
       return data['id'] as String?;
     }
+    if (await AuthService.instance.handleUnauthorizedResponse(response)) {
+      throw LeaderboardException(AuthService.sessionSupersededMessage);
+    }
     throw LeaderboardException(_errorMessage(response));
   }
 
@@ -124,6 +127,9 @@ class LeaderboardService {
           .whereType<Map<String, dynamic>>()
           .map(LeaderboardEntry.fromApiJson)
           .toList();
+    }
+    if (await AuthService.instance.handleUnauthorizedResponse(response)) {
+      throw LeaderboardException(AuthService.sessionSupersededMessage);
     }
     throw LeaderboardException(_errorMessage(response));
   }

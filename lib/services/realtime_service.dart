@@ -338,9 +338,20 @@ class RealtimeService {
     unawaited(_tearDownChannel());
 
     _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(_reconnectDelay, () {
+    _reconnectTimer = Timer(_reconnectDelay, () async {
       if (_intentionalDisconnect) return;
-      unawaited(connect());
+      if (!canUseRealtime) return;
+      try {
+        await AuthService.instance.ensureSessionStillValid();
+      } on AuthException catch (e) {
+        if (AuthService.isSessionSupersededMessage(e.message)) {
+          return;
+        }
+      } catch (_) {
+        // 網路錯誤時仍嘗試重連 WebSocket。
+      }
+      if (_intentionalDisconnect || !canUseRealtime) return;
+      await connect();
     });
   }
 

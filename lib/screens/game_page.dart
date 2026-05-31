@@ -105,6 +105,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   /// 娛樂模式：本回合是否已使用 AI 道具（送出時分數折半）。
   bool _aiHintConsumedThisRound = false;
   bool _aiHintLoading = false;
+  bool _aiSuggestedGuess = false;
   LatLng? _aiHintLocation;
   String? _aiHintReasoning;
 
@@ -465,6 +466,14 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     setState(() => _guessedLocation = position);
   }
 
+  void _handleGuessDragEnd(LatLng position) {
+    if (_submitted) return;
+    setState(() {
+      _guessedLocation = position;
+      _aiSuggestedGuess = false;
+    });
+  }
+
   /// 街景依 Metadata [links] 移動後，同步更新本回合「正確答案」座標與 panoId。
   void _handleStreetViewPlaceChanged(Place newPlace) {
     if (_submitted) return;
@@ -553,6 +562,8 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
       _aiHintConsumedThisRound = true;
       _aiHintLocation = hint.location;
       _aiHintReasoning = hint.reasoning?.trim();
+      _guessedLocation = hint.location;
+      _aiSuggestedGuess = true;
       _mapOverlayOpen = true;
     });
   }
@@ -757,16 +768,10 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
 
   Future<void> _fitMapToAiHint() async {
     final GoogleMapController? c = _mapController;
-    final LatLng? hint = _aiHintLocation;
+    final LatLng? hint = _guessedLocation ?? _aiHintLocation;
     if (c == null || hint == null) return;
     try {
-      if (_guessedLocation != null) {
-        final LatLngBounds bounds =
-            boundsForTwoPoints(_guessedLocation!, hint);
-        await c.animateCamera(CameraUpdate.newLatLngBounds(bounds, 100));
-      } else {
-        await c.animateCamera(CameraUpdate.newLatLngZoom(hint, 4));
-      }
+      await c.animateCamera(CameraUpdate.newLatLngZoom(hint, 4));
     } catch (_) {
       // 忽略 PlatformView 邊界例外。
     }
@@ -845,6 +850,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
       _memeRequestSeq++;
       _aiHintConsumedThisRound = false;
       _aiHintLoading = false;
+      _aiSuggestedGuess = false;
       _aiHintLocation = null;
       _aiHintReasoning = null;
     });
@@ -914,8 +920,8 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
                 aiResult: _aiResultForRound(_currentRound),
                 aiReasoning: _aiGuessByRound[_currentRound]?.reasoning,
                 aiConfidence: _aiGuessByRound[_currentRound]?.confidence,
-                aiHintLocation:
-                    _entertainmentDuel && !_submitted ? _aiHintLocation : null,
+                aiSuggestedGuess:
+                    _entertainmentDuel && !_submitted && _aiSuggestedGuess,
                 aiHintReasoning:
                     _entertainmentDuel && !_submitted ? _aiHintReasoning : null,
                 aiHintHalvesScore: _entertainmentDuel && _aiHintConsumedThisRound,
@@ -934,6 +940,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
                   }
                 },
                 onGuessChanged: _handleGuessChanged,
+                onGuessDragEnd: _handleGuessDragEnd,
                 onClose: _closeMap,
                 onNextRound: _goToNextRoundOrFinish,
               ),
@@ -1394,11 +1401,12 @@ class _MapOverlay extends StatelessWidget {
   final GuessResult? aiResult;
   final String? aiReasoning;
   final double? aiConfidence;
-  final LatLng? aiHintLocation;
+  final bool aiSuggestedGuess;
   final String? aiHintReasoning;
   final bool aiHintHalvesScore;
   final ValueChanged<GoogleMapController> onMapCreated;
   final ValueChanged<LatLng> onGuessChanged;
+  final ValueChanged<LatLng>? onGuessDragEnd;
   final VoidCallback onClose;
   final VoidCallback onNextRound;
 
@@ -1420,11 +1428,12 @@ class _MapOverlay extends StatelessWidget {
     required this.aiResult,
     required this.aiReasoning,
     required this.aiConfidence,
-    this.aiHintLocation,
+    this.aiSuggestedGuess = false,
     this.aiHintReasoning,
     this.aiHintHalvesScore = false,
     required this.onMapCreated,
     required this.onGuessChanged,
+    this.onGuessDragEnd,
     required this.onClose,
     required this.onNextRound,
   });
@@ -1433,7 +1442,8 @@ class _MapOverlay extends StatelessWidget {
   Widget build(BuildContext context) {
     final ColorScheme cs = Theme.of(context).colorScheme;
     final bool hasGuess = guessed != null;
-    final bool showAiHint = !submitted && aiHintLocation != null;
+    final bool showAiHintPanel =
+        !submitted && (aiHintHalvesScore || aiHintReasoning != null);
     final double topSafe = MediaQuery.of(context).padding.top;
     final double bottomSafe = MediaQuery.of(context).padding.bottom;
 
@@ -1444,7 +1454,9 @@ class _MapOverlay extends StatelessWidget {
             : vsPlayer
                 ? 200
                 : 120)
-        : (showAiHint && (aiHintReasoning?.isNotEmpty ?? false) ? 168 : 110);
+        : (showAiHintPanel && (aiHintReasoning?.isNotEmpty ?? false)
+            ? 168
+            : 110);
 
     return Positioned.fill(
       child: Material(
@@ -1455,12 +1467,13 @@ class _MapOverlay extends StatelessWidget {
             Positioned.fill(
               child: GuessMap(
                 onGuessChanged: onGuessChanged,
+                onGuessDragEnd: onGuessDragEnd,
                 onMapCreated: onMapCreated,
                 locked: submitted,
                 guessedLocation: guessed,
                 correctLocation: submitted ? place.latLng : null,
                 aiLocation: submitted ? aiResult?.guessed : null,
-                aiHintLocation: showAiHint ? aiHintLocation : null,
+                aiSuggestedGuess: aiSuggestedGuess,
                 cornerRadius: 0,
                 bottomInset: bottomBarHeight + bottomSafe + 8,
               ),
@@ -1475,7 +1488,7 @@ class _MapOverlay extends StatelessWidget {
                 submitted: submitted,
                 wasTimeUp: wasTimeUp,
                 hasGuess: hasGuess,
-                titleOverride: showAiHint ? 'AI 建議（橘標僅供參考）' : null,
+                titleOverride: aiSuggestedGuess ? 'AI 建議（拖移後改為你的猜測）' : null,
                 onClose: submitted ? null : onClose,
               ),
             ),
@@ -1491,12 +1504,13 @@ class _MapOverlay extends StatelessWidget {
                   if (submitted && result != null)
                     _ResultStrip(result: result!)
                   else ...<Widget>[
-                    if (showAiHint)
+                    if (showAiHintPanel)
                       _EntertainmentAiHintStrip(
                         reasoning: aiHintReasoning,
                         halvesScore: aiHintHalvesScore,
+                        aiSuggestedGuess: aiSuggestedGuess,
                       ),
-                    if (showAiHint) const SizedBox(height: 8),
+                    if (showAiHintPanel) const SizedBox(height: 8),
                     _GuessCoordPill(guessed: guessed),
                   ],
                   if (submitted && vsAi) ...<Widget>[
@@ -1576,10 +1590,12 @@ class _EntertainmentAiHintStrip extends StatelessWidget {
   const _EntertainmentAiHintStrip({
     required this.reasoning,
     required this.halvesScore,
+    required this.aiSuggestedGuess,
   });
 
   final String? reasoning;
   final bool halvesScore;
+  final bool aiSuggestedGuess;
 
   static const Color _aiColor = Color(0xFFFF7A1A);
 
@@ -1601,9 +1617,11 @@ class _EntertainmentAiHintStrip extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  halvesScore
-                      ? '已用 AI 道具 · 送出後本回合分數折半'
-                      : 'AI 建議（橘標）',
+                  aiSuggestedGuess
+                      ? 'AI 建議（橘標）· 拖移後改為你的猜測'
+                      : (halvesScore
+                          ? '已用 AI 道具 · 送出後本回合分數折半'
+                          : 'AI 建議'),
                   style: const TextStyle(
                     color: _aiColor,
                     fontWeight: FontWeight.w900,

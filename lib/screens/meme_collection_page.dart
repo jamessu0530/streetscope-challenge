@@ -33,11 +33,44 @@ class _MemeCollectionPageState extends State<MemeCollectionPage> {
   Map<String, List<CollectedMeme>> _grouped =
       const <String, List<CollectedMeme>>{};
   int _totalCount = 0;
+  final SearchController _searchController = SearchController();
+  String _searchQuery = '';
 
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Map<String, List<CollectedMeme>> get _filteredGrouped {
+    final String q = _searchQuery.trim().toLowerCase();
+    if (q.isEmpty) return _grouped;
+
+    final Map<String, List<CollectedMeme>> out =
+        <String, List<CollectedMeme>>{};
+    for (final MapEntry<String, List<CollectedMeme>> entry
+        in _grouped.entries) {
+      final bool countryMatch = entry.key.toLowerCase().contains(q);
+      final List<CollectedMeme> memes = countryMatch
+          ? entry.value
+          : entry.value
+              .where(
+                (CollectedMeme m) =>
+                    m.title.toLowerCase().contains(q) ||
+                    m.subreddit.toLowerCase().contains(q),
+              )
+              .toList();
+      if (memes.isNotEmpty) {
+        out[entry.key] = memes;
+      }
+    }
+    return out;
   }
 
   Future<void> _load() async {
@@ -51,6 +84,11 @@ class _MemeCollectionPageState extends State<MemeCollectionPage> {
       });
       return;
     }
+
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
 
     try {
       final Map<String, List<CollectedMeme>> grouped =
@@ -118,75 +156,161 @@ class _MemeCollectionPageState extends State<MemeCollectionPage> {
 
   @override
   Widget build(BuildContext context) {
-    // 依「收集數量」遞減排序國家
-    final List<MapEntry<String, List<CollectedMeme>>> sorted = _grouped.entries
-        .toList()
-      ..sort((MapEntry<String, List<CollectedMeme>> a,
-              MapEntry<String, List<CollectedMeme>> b) =>
-          b.value.length.compareTo(a.value.length));
+    final List<MapEntry<String, List<CollectedMeme>>> sorted =
+        _filteredGrouped.entries.toList()
+          ..sort((MapEntry<String, List<CollectedMeme>> a,
+                  MapEntry<String, List<CollectedMeme>> b) =>
+              b.value.length.compareTo(a.value.length));
+
+    final bool keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
 
     return Scaffold(
       backgroundColor: MatchdayPalette.bg,
+      resizeToAvoidBottomInset: false,
       body: Stack(
         children: <Widget>[
-          SafeArea(
-            bottom: false,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                const MatchdayTopTicker(
-                  label: 'ARCHIVE · MEME VAULT',
-                  trailing: 'WORLD TOUR',
-                ),
-                _Header(
-                  onBack: () {
-                    AudioService.instance.playClick();
-                    Navigator.of(context).pop();
-                  },
-                  onClear: _totalCount > 0 ? _confirmClear : null,
-                  totalCount: _totalCount,
-                  countryCount: _grouped.length,
+          MediaQuery.removeViewInsets(
+            removeBottom: true,
+            context: context,
+            child: SafeArea(
+              bottom: false,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  if (!keyboardOpen)
+                    const MatchdayTopTicker(
+                      label: 'ARCHIVE · MEME VAULT',
+                      trailing: 'WORLD TOUR',
+                    ),
+                  _Header(
+                    onBack: () {
+                      AudioService.instance.playClick();
+                      Navigator.of(context).pop();
+                    },
+                    onClear: _totalCount > 0 ? _confirmClear : null,
+                    totalCount: _totalCount,
+                    countryCount: _grouped.length,
+                    compact: keyboardOpen,
+                  ),
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(16, 0, 16, keyboardOpen ? 4 : 8),
+                    child: SearchBar(
+                    controller: _searchController,
+                    hintText: '搜尋標題或國家…',
+                    leading: const Icon(Icons.search),
+                    trailing: _searchQuery.isEmpty
+                        ? null
+                        : <Widget>[
+                            IconButton(
+                              tooltip: '清除',
+                              onPressed: () {
+                                AudioService.instance.playClick();
+                                _searchController.clear();
+                                setState(() => _searchQuery = '');
+                              },
+                              icon: const Icon(Icons.close),
+                            ),
+                          ],
+                    backgroundColor:
+                        WidgetStateProperty.all(MatchdayPalette.cream),
+                    side: WidgetStateProperty.all(const BorderSide(
+                      color: MatchdayPalette.ink,
+                      width: 2,
+                    )),
+                    onChanged: (String value) {
+                      setState(() => _searchQuery = value);
+                    },
+                  ),
                 ),
                 Expanded(
-                  child: _loading
-                      ? const Center(child: CircularProgressIndicator())
-                      : (_error != null
-                          ? _LoginOrErrorState(
-                              message: _error!,
-                              onLogin: () async {
-                                await Navigator.of(context).push(
-                                  MaterialPageRoute<void>(
-                                    builder: (BuildContext _) =>
-                                        const LoginPage(),
-                                  ),
-                                );
-                                if (!mounted) return;
-                                setState(() => _loading = true);
-                                await _load();
-                              },
-                            )
-                          : (sorted.isEmpty
-                              ? const _EmptyState()
-                              : ListView.builder(
-                              // 底部多 110 給浮動 nav bar
-                              padding: const EdgeInsets.fromLTRB(0, 4, 0, 110),
-                              itemCount: sorted.length,
-                              itemBuilder: (BuildContext context, int i) {
-                                final MapEntry<String, List<CollectedMeme>> e =
-                                    sorted[i];
-                                return _CountrySection(
-                                  country: e.key,
-                                  memes: e.value,
-                                );
-                              },
-                            ))),
+                  child: _buildContent(sorted, keyboardOpen),
                 ),
               ],
+              ),
             ),
           ),
           const FloatingHomeNavBar(current: HomeTab.memeLibrary),
         ],
       ),
+    );
+  }
+
+  Widget _buildContent(
+    List<MapEntry<String, List<CollectedMeme>>> sorted,
+    bool keyboardOpen,
+  ) {
+    if (_loading && _grouped.isEmpty) {
+      return const Center(
+        child: ApiLoadingBar(label: '載入迷因庫…'),
+      );
+    }
+
+    if (_error != null) {
+      return RefreshIndicator(
+        onRefresh: _load,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: <Widget>[
+            SizedBox(height: MediaQuery.sizeOf(context).height * 0.18),
+            _LoginOrErrorState(
+              message: _error!,
+              onLogin: () async {
+                await Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (BuildContext _) => const LoginPage(),
+                  ),
+                );
+                if (!mounted) return;
+                await _load();
+              },
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (sorted.isEmpty) {
+      final Widget empty = _totalCount == 0
+          ? const _EmptyState()
+          : _SearchEmptyState(query: _searchQuery);
+      return RefreshIndicator(
+        onRefresh: _load,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: <Widget>[
+            SizedBox(height: MediaQuery.sizeOf(context).height * 0.12),
+            empty,
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      children: <Widget>[
+        if (_loading)
+          const LinearProgressIndicator(
+            color: MatchdayPalette.ink,
+            backgroundColor: Color(0xFFE8E4DC),
+            minHeight: 3,
+          ),
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: _load,
+            child: ListView.builder(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: EdgeInsets.fromLTRB(0, 4, 0, keyboardOpen ? 24 : 110),
+              itemCount: sorted.length,
+              itemBuilder: (BuildContext context, int i) {
+                final MapEntry<String, List<CollectedMeme>> e = sorted[i];
+                return _CountrySection(
+                  country: e.key,
+                  memes: e.value,
+                );
+              },
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -199,12 +323,14 @@ class _Header extends StatelessWidget {
   final VoidCallback? onClear;
   final int totalCount;
   final int countryCount;
+  final bool compact;
 
   const _Header({
     required this.onBack,
     required this.onClear,
     required this.totalCount,
     required this.countryCount,
+    this.compact = false,
   });
 
   @override
@@ -224,27 +350,29 @@ class _Header extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                const Text(
+                Text(
                   'MEME VAULT',
                   style: TextStyle(
-                    fontSize: 28,
+                    fontSize: compact ? 22 : 28,
                     fontWeight: FontWeight.w900,
                     letterSpacing: -1,
                     color: MatchdayPalette.ink,
                     height: 1,
                   ),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  'COLLECTED $totalCount · '
-                  'COUNTRIES $countryCount',
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 2.2,
-                    color: Colors.black54,
+                if (!compact) ...<Widget>[
+                  const SizedBox(height: 4),
+                  Text(
+                    'COLLECTED $totalCount · '
+                    'COUNTRIES $countryCount',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 2.2,
+                      color: Colors.black54,
+                    ),
                   ),
-                ),
+                ],
               ],
             ),
           ),
@@ -492,6 +620,50 @@ class _LoginOrErrorState extends StatelessWidget {
                 ),
               ),
             ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// 搜尋無結果
+// =============================================================================
+class _SearchEmptyState extends StatelessWidget {
+  const _SearchEmptyState({required this.query});
+
+  final String query;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(
+              Icons.search_off,
+              size: 56,
+              color: MatchdayPalette.ink.withValues(alpha: 0.35),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              query.trim().isEmpty ? '沒有符合的迷因' : '找不到「${query.trim()}」',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w900,
+                color: MatchdayPalette.ink,
+              ),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              '試試國家名稱或 meme 標題關鍵字',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, color: Colors.black54),
+            ),
           ],
         ),
       ),

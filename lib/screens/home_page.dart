@@ -20,15 +20,13 @@ import '../data/game_constants.dart';
 import '../models/auth_user.dart';
 import '../models/game_region.dart';
 import '../models/game_settings.dart';
-import '../models/online_player.dart';
 import '../services/audio_service.dart';
 import '../services/auth_service.dart';
 import '../widgets/floating_home_nav_bar.dart';
 import '../widgets/matchday_ui.dart';
 import 'change_password_page.dart';
-import '../services/realtime_service.dart';
-import 'lobby_page.dart';
 import 'login_page.dart';
+import 'nickname_page.dart';
 import 'play_history_page.dart';
 import 'mode_selection_page.dart';
 
@@ -50,6 +48,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     AudioService.instance.startHomeBgm();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await ensureNicknameSetup(context);
+    });
   }
 
   @override
@@ -108,15 +110,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                         setState(() => _maxMoveSteps = v),
                   ),
                   const SizedBox(height: 16),
-                  _OnlineLobbyEntry(
-                    lobbySettings: GameSettings(
-                      region: _region,
-                      secondsPerRound: _secondsPerRound,
-                      roundsPerGame: _roundsPerGame,
-                      maxMoveSteps: _maxMoveSteps,
-                    ),
-                  ),
-                  const SizedBox(height: 24),
                   _ContinueCta(onTap: _goToModeSelection),
                   const SizedBox(height: 28),
                   const MatchdayFooterStripe(),
@@ -640,103 +633,6 @@ class _TimeSlider extends StatelessWidget {
 // =============================================================================
 // Continue CTA：黑底粗框大字 + 右上角切角，視覺呼應 Matchday Card
 // =============================================================================
-class _OnlineLobbyEntry extends StatelessWidget {
-  const _OnlineLobbyEntry({required this.lobbySettings});
-
-  final GameSettings lobbySettings;
-
-  @override
-  Widget build(BuildContext context) {
-    return ValueListenableBuilder<AuthUser?>(
-      valueListenable: AuthService.instance.currentUser,
-      builder: (BuildContext context, AuthUser? user, _) {
-        if (user == null) {
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Text(
-              '登入後可進線上大廳，查看在線玩家並聊天',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: MatchdayPalette.ink.withValues(alpha: 0.55),
-              ),
-            ),
-          );
-        }
-
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: Material(
-            color: MatchdayPalette.cream,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-              side: const BorderSide(color: MatchdayPalette.ink, width: 1.5),
-            ),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(14),
-              onTap: () {
-                AudioService.instance.playClick();
-                Navigator.push<void>(
-                  context,
-                  MaterialPageRoute<void>(
-                    builder: (BuildContext context) =>
-                        LobbyPage(lobbySettings: lobbySettings),
-                  ),
-                );
-              },
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  children: <Widget>[
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          const Text(
-                            '線上大廳',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          ValueListenableBuilder<List<OnlinePlayer>>(
-                            valueListenable:
-                                RealtimeService.instance.onlinePlayers,
-                            builder: (
-                              BuildContext context,
-                              List<OnlinePlayer> players,
-                              _,
-                            ) {
-                              final int n = players.length;
-                              return Text(
-                                n <= 1
-                                    ? 'WebSocket · 在線（僅你）'
-                                    : 'WebSocket · $n 人在線',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: MatchdayPalette.ink
-                                      .withValues(alpha: 0.6),
-                                ),
-                              );
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
-                    const Icon(Icons.chevron_right, color: MatchdayPalette.ink),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
 class _ContinueCta extends StatelessWidget {
   final VoidCallback onTap;
   const _ContinueCta({required this.onTap});
@@ -976,6 +872,22 @@ class _LoggedInPill extends StatelessWidget {
             ],
           ),
         ),
+        const PopupMenuItem<String>(
+          value: 'nickname',
+          child: Row(
+            children: <Widget>[
+              Icon(Icons.badge_outlined, size: 16, color: MatchdayPalette.ink),
+              SizedBox(width: 8),
+              Text(
+                '編輯暱稱',
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  color: MatchdayPalette.ink,
+                ),
+              ),
+            ],
+          ),
+        ),
         if (user.provider == AuthProvider.email &&
             AuthService.instance.accessToken != null)
           const PopupMenuItem<String>(
@@ -1012,6 +924,13 @@ class _LoggedInPill extends StatelessWidget {
         ),
       ],
     );
+    if (choice == 'nickname' && context.mounted) {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (BuildContext _) => const EditNicknamePage(),
+        ),
+      );
+    }
     if (choice == 'history' && context.mounted) {
       await Navigator.of(context).push(
         MaterialPageRoute<void>(

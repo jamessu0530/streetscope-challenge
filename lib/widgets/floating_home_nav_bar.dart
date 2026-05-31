@@ -1,31 +1,22 @@
 // =============================================================================
-// FloatingHomeNavBar — 3-tab 浮動主導覽列
+// FloatingHomeNavBar — 4-tab 浮動主導覽列
 //
 // 設計規格：
 //   - 一個藥丸（capsule）形狀的浮動條，置中於畫面底部
-//   - 三個 tab：左=排行榜、中=主頁、右=迷因搜集庫
+//   - 四個 tab：排行榜、主頁、大廳、迷因搜集庫
 //   - 目前頁面的 tab 用黑底白字高亮；其他 tab 淡色 / 透明
 //   - 切 tab 會做「真的 page navigation」，不是 in-page tab
-//
-// 用法：
-//   在任何頁面的 Scaffold body (Stack) 裡，放入：
-//     const FloatingHomeNavBar(current: HomeTab.home)
-//   並確保頁面內容的底部有足夠 padding（約 110）讓內容不會被遮住。
-//
-// 導覽行為（避免 push 無限堆疊）：
-//   - 點「主頁」：popUntil 回到第一個 route（HomePage 永遠是 root）
-//   - 從主頁 push 到 Leaderboard / MemeLibrary：用 push（保留返回鍵）
-//   - 從 Leaderboard <-> MemeLibrary：用 pushReplacement（不堆疊）
 // =============================================================================
 
 import 'package:flutter/material.dart';
 
 import '../screens/leaderboard_page.dart';
+import '../screens/lobby_page.dart';
 import '../screens/meme_collection_page.dart';
 import '../services/audio_service.dart';
 import 'matchday_ui.dart';
 
-enum HomeTab { leaderboard, home, memeLibrary }
+enum HomeTab { leaderboard, home, lobby, memeLibrary }
 
 class FloatingHomeNavBar extends StatelessWidget {
   final HomeTab current;
@@ -34,7 +25,13 @@ class FloatingHomeNavBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final double bottomSafe = MediaQuery.of(context).padding.bottom;
+    final MediaQueryData mq = MediaQuery.of(context);
+    // 鍵盤開啟時隱藏，避免 bar 被往上擠到鍵盤上方。
+    if (mq.viewInsets.bottom > 0) {
+      return const SizedBox.shrink();
+    }
+
+    final double bottomSafe = mq.padding.bottom;
 
     return Positioned(
       left: 0,
@@ -44,7 +41,7 @@ class FloatingHomeNavBar extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20),
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 380),
+            constraints: const BoxConstraints(maxWidth: 440),
             child: _NavPill(current: current),
           ),
         ),
@@ -97,8 +94,16 @@ class _NavPill extends StatelessWidget {
           ),
           Expanded(
             child: _NavItem(
+              icon: Icons.groups_outlined,
+              label: '大廳',
+              active: current == HomeTab.lobby,
+              onTap: () => _navigate(context, HomeTab.lobby),
+            ),
+          ),
+          Expanded(
+            child: _NavItem(
               icon: Icons.collections_bookmark_outlined,
-              label: '迷因搜集庫',
+              label: '迷因庫',
               active: current == HomeTab.memeLibrary,
               onTap: () => _navigate(context, HomeTab.memeLibrary),
             ),
@@ -119,6 +124,9 @@ class _NavPill extends StatelessWidget {
         break;
       case HomeTab.leaderboard:
         _pushOrReplace(context, const LeaderboardPage());
+        break;
+      case HomeTab.lobby:
+        _pushOrReplace(context, const LobbyPage());
         break;
       case HomeTab.memeLibrary:
         _pushOrReplace(context, const MemeCollectionPage());
@@ -203,9 +211,9 @@ class _NavItem extends StatelessWidget {
                   duration: const Duration(milliseconds: 240),
                   style: TextStyle(
                     color: active ? Colors.white : Colors.black54,
-                    fontSize: 10,
+                    fontSize: 9,
                     fontWeight: FontWeight.w900,
-                    letterSpacing: 1.5,
+                    letterSpacing: 0.8,
                   ),
                   child: Text(label),
                 ),

@@ -58,6 +58,7 @@ class _GeoGuesserAppState extends State<GeoGuesserApp> {
     RealtimeService.instance.pendingDuelStart.addListener(_onPendingDuelStart);
     RealtimeService.instance.pendingDuelResync.addListener(_onPendingDuelResync);
     RealtimeService.instance.incomingDuelInvite.addListener(_onIncomingInvite);
+    AuthService.instance.sessionRevokedNotice.addListener(_onSessionRevoked);
   }
 
   @override
@@ -65,7 +66,20 @@ class _GeoGuesserAppState extends State<GeoGuesserApp> {
     RealtimeService.instance.pendingDuelStart.removeListener(_onPendingDuelStart);
     RealtimeService.instance.pendingDuelResync.removeListener(_onPendingDuelResync);
     RealtimeService.instance.incomingDuelInvite.removeListener(_onIncomingInvite);
+    AuthService.instance.sessionRevokedNotice.removeListener(_onSessionRevoked);
     super.dispose();
+  }
+
+  void _onSessionRevoked() {
+    final String? message = AuthService.instance.sessionRevokedNotice.value;
+    if (message == null) return;
+    AuthService.instance.sessionRevokedNotice.value = null;
+
+    final BuildContext? ctx = appNavigatorKey.currentContext;
+    if (ctx == null || !ctx.mounted) return;
+    ScaffoldMessenger.of(ctx).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
   }
 
   void _onIncomingInvite() {
