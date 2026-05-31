@@ -19,13 +19,17 @@ dependencies:
   # 用 WebView 嵌 Maps JavaScript Street View，才有 GeoGuessr 那種沿路箭頭
   webview_flutter: ^4.7.0
   # BGM / 音效播放
-  audioplayers: ^6.1.0
+  audioplayers: ^6.7.0
   flutter_dotenv: ^6.0.0
   shared_preferences: ^2.5.3
   google_sign_in: ^6.2.2
   flutter_facebook_auth: ^7.1.2
   flutter_web_auth_2: ^4.1.0
   flutter_svg: ^2.0.10+1
+
+dependency_overrides:
+  # 真機安裝需有效簽章；舊版 native asset framework 會觸發 0xe8008014
+  objective_c: ^9.4.1
 
 dev_dependencies:
   flutter_test:

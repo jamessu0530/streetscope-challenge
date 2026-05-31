@@ -40,6 +40,9 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 3000
 2. 點另一位在線玩家 → **發起挑戰**
 3. 對方 **接受** → 房主產生題目 → 雙方進入 `GamePage`（可選 Picture / No Move / Move）
 4. 每回合送出後 WebSocket 同步分數；全部回合結束顯示勝負
+5. 對手斷線 → 保留房間、等待重連（`duel_opponent_disconnected`）；重連後 `duel_state_sync` 恢復進度
+6. 在線方可按 **退出對戰**（`duel_leave`）；對手收到 `duel_cancelled`
+7. 對戰結束後結果頁可 **再戰一次**（沿用邀請流程）
 
 登入後 WebSocket 會保持連線，**首頁也能收到對戰邀請**（不必先進大廳）。
 

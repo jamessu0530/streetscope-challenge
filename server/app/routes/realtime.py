@@ -41,6 +41,7 @@ async def websocket_lobby(
     await websocket.accept()
     await hub.register(websocket, user_id, display_name)
     await hub.send_presence_to(websocket)
+    await duel_manager.on_connect(user_id)
 
     try:
         while True:

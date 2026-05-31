@@ -40,6 +40,23 @@ class LeaderboardService {
     required List<GuessResult> results,
     required GameSettings settings,
   }) async {
+    final int totalScore = results.fold<int>(
+      0,
+      (int sum, GuessResult r) => sum + r.score,
+    );
+    return saveRunTotals(
+      totalScore: totalScore,
+      rounds: results.length,
+      settings: settings,
+    );
+  }
+
+  /// 以總分提交（對戰結算等沒有逐回合 [GuessResult] 時使用）。
+  Future<String?> saveRunTotals({
+    required int totalScore,
+    required int rounds,
+    required GameSettings settings,
+  }) async {
     if (!AuthService.instance.isLoggedIn) {
       return null;
     }
@@ -47,11 +64,6 @@ class LeaderboardService {
     if (token == null || token.isEmpty || !hasApiBaseUrl) {
       throw LeaderboardException('請先登入並設定 API_BASE_URL');
     }
-
-    final int totalScore = results.fold<int>(
-      0,
-      (int sum, GuessResult r) => sum + r.score,
-    );
 
     final http.Response response = await http
         .post(
@@ -62,7 +74,7 @@ class LeaderboardService {
           },
           body: jsonEncode(<String, dynamic>{
             'totalScore': totalScore,
-            'rounds': results.length,
+            'rounds': rounds,
             'secondsPerRound': settings.secondsPerRound,
             'mode': settings.mode.name,
             'region': settings.region.name,

@@ -39,6 +39,8 @@ class DuelRoom:
     )
     total_scores: dict[str, int] = field(default_factory=dict)
     completed_rounds: set[int] = field(default_factory=set)
+    disconnected: set[str] = field(default_factory=set)
+    awaiting_advance: int | None = None
 
     def player_ids(self) -> list[str]:
         return [self.host_id, self.guest_id]
@@ -71,6 +73,36 @@ class DuelManager:
             await self._round_submit(user_id, payload)
         elif msg_type == "duel_advance_round":
             await self._advance_round(user_id, payload)
+        elif msg_type == "duel_leave":
+            await self._leave_duel(user_id, payload)
+
+    def _room_for_player(self, user_id: str) -> DuelRoom | None:
+        for room in self._rooms.values():
+            if user_id in room.player_ids():
+                return room
+        return None
+
+    async def on_connect(self, user_id: str) -> None:
+        async with self._lock:
+            room = self._room_for_player(user_id)
+            if room is None:
+                return
+            was_offline = user_id in room.disconnected
+            room.disconnected.discard(user_id)
+            self._user_room[user_id] = room.room_id
+            opp_id = room.opponent_of(user_id)
+            opp_name = room.display_name(user_id)
+
+        await self._send_state_sync(user_id, room)
+        if was_offline:
+            await self._send_user(
+                opp_id,
+                {
+                    "type": "duel_opponent_reconnected",
+                    "roomId": room.room_id,
+                    "opponentName": opp_name,
+                },
+            )
 
     async def on_disconnect(self, user_id: str) -> None:
         async with self._lock:
@@ -80,15 +112,36 @@ class DuelManager:
             room = self._rooms.get(room_id)
             if room is None:
                 return
+            room.disconnected.add(user_id)
+            opp_id = room.opponent_of(user_id)
+            disconnected_name = room.display_name(user_id)
+
+        await self._send_user(
+            opp_id,
+            {
+                "type": "duel_opponent_disconnected",
+                "roomId": room_id,
+                "opponentName": disconnected_name,
+            },
+        )
+
+    async def _leave_duel(self, user_id: str, payload: dict[str, Any]) -> None:
+        room_id = str(payload.get("roomId") or "").strip()
+        async with self._lock:
+            room = self._rooms.get(room_id)
+            if room is None or user_id not in room.player_ids():
+                return
+            opp_id = room.opponent_of(user_id)
             for pid in room.player_ids():
                 self._user_room.pop(pid, None)
-            opp = room.opponent_of(user_id)
+            self._rooms.pop(room_id, None)
+
         await self._send_user(
-            opp,
+            opp_id,
             {
                 "type": "duel_cancelled",
                 "roomId": room_id,
-                "reason": "opponent_disconnected",
+                "reason": "opponent_left",
             },
         )
 
@@ -120,6 +173,7 @@ class DuelManager:
             return
 
         invite_id = secrets.token_urlsafe(8)
+        is_rematch = bool(payload.get("rematch"))
         self._invites[invite_id] = DuelInvite(
             invite_id=invite_id,
             from_user_id=from_user_id,
@@ -133,6 +187,7 @@ class DuelManager:
             {
                 "type": "duel_invite_incoming",
                 "inviteId": invite_id,
+                "rematch": is_rematch,
                 "from": {
                     "id": from_user_id,
                     "displayName": client.display_name,
@@ -370,13 +425,16 @@ class DuelManager:
                     room_id,
                 )
                 return
-            if finished_round + 1 != room.round_index:
+            if room.awaiting_advance != finished_round:
                 _log.warning(
-                    "duel advance: round %s stale (server at %s)",
+                    "duel advance: round %s not awaiting advance (at %s)",
                     finished_round,
-                    room.round_index,
+                    room.awaiting_advance,
                 )
                 return
+            room.round_index += 1
+            room.awaiting_advance = None
+            room.round_guesses.clear()
             opp_id = room.opponent_of(user_id)
 
         await self._send_user(
@@ -458,11 +516,57 @@ class DuelManager:
                 for pid in room.player_ids():
                     self._user_room.pop(pid, None)
             else:
-                room.round_index += 1
-                room.round_guesses.clear()
+                room.awaiting_advance = round_index
 
         for pid in room.player_ids():
             await self._send_user(pid, payload)
+
+    def _build_state_sync(self, room: DuelRoom, user_id: str) -> dict[str, Any]:
+        opp_id = room.opponent_of(user_id)
+        in_settlement = room.awaiting_advance is not None
+        display_round = room.awaiting_advance if in_settlement else room.round_index
+        guesses = room.round_guesses.get(display_round, {})
+        my_guess = guesses.get(user_id)
+        opp_guess = guesses.get(opp_id)
+
+        return {
+            "type": "duel_state_sync",
+            "roomId": room.room_id,
+            "settings": room.settings,
+            "places": room.places,
+            "round": display_round,
+            "inSettlement": in_settlement,
+            "canAdvance": in_settlement,
+            "opponent": {
+                "id": opp_id,
+                "displayName": room.display_name(opp_id),
+            },
+            "opponentDisconnected": opp_id in room.disconnected,
+            "totals": [
+                {
+                    "id": room.host_id,
+                    "displayName": room.host_name,
+                    "totalScore": room.total_scores.get(room.host_id, 0),
+                },
+                {
+                    "id": room.guest_id,
+                    "displayName": room.guest_name,
+                    "totalScore": room.total_scores.get(room.guest_id, 0),
+                },
+            ],
+            "mySubmitted": my_guess is not None,
+            "opponentSubmitted": opp_guess is not None,
+            "myScore": my_guess.get("score") if my_guess else None,
+            "myDistanceKm": my_guess.get("distanceKm") if my_guess else None,
+            "opponentScore": opp_guess.get("score") if opp_guess else None,
+            "opponentDistanceKm": opp_guess.get("distanceKm") if opp_guess else None,
+        }
+
+    async def _send_state_sync(self, user_id: str, room: DuelRoom) -> None:
+        if not room.places:
+            return
+        payload = self._build_state_sync(room, user_id)
+        await self._send_user(user_id, payload)
 
     async def _send_user(self, user_id: str, payload: dict[str, Any]) -> None:
         client = hub.get_client(user_id)

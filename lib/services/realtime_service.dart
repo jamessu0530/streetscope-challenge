@@ -39,6 +39,8 @@ class RealtimeService {
   final ValueNotifier<String?> duelStatusMessage = ValueNotifier<String?>(null);
   final ValueNotifier<DuelStartEvent?> pendingDuelStart =
       ValueNotifier<DuelStartEvent?>(null);
+  final ValueNotifier<DuelStateSync?> pendingDuelResync =
+      ValueNotifier<DuelStateSync?>(null);
 
   /// 遊戲頁註冊：接收對手送出、回合結算。
   void Function(Map<String, dynamic>)? onDuelGameEvent;
@@ -145,12 +147,14 @@ class RealtimeService {
   void sendDuelInvite({
     required String toUserId,
     required GameSettings settings,
+    bool rematch = false,
   }) {
-    duelStatusMessage.value = '已送出挑戰邀請…';
+    duelStatusMessage.value = rematch ? '已送出再戰邀請…' : '已送出挑戰邀請…';
     _send(<String, dynamic>{
       'type': 'duel_invite',
       'toUserId': toUserId,
       'settings': settings.toDuelJson(),
+      'rematch': rematch,
     });
   }
 
@@ -189,6 +193,14 @@ class RealtimeService {
       'type': 'duel_advance_round',
       'roomId': roomId,
       'round': finishedRound,
+    });
+  }
+
+  /// 主動退出進行中的對戰（對手會收到 duel_cancelled）。
+  void leaveDuel({required String roomId}) {
+    _send(<String, dynamic>{
+      'type': 'duel_leave',
+      'roomId': roomId,
     });
   }
 
@@ -261,10 +273,18 @@ class RealtimeService {
         duelStatusMessage.value = '對戰已取消';
         _emitDuelGameEvent(payload);
         return;
+      case 'duel_opponent_disconnected':
+      case 'duel_opponent_reconnected':
+      case 'duel_state_sync':
       case 'duel_round_ack':
       case 'duel_opponent_submitted':
       case 'duel_round_complete':
       case 'duel_sync_next_round':
+        if ((payload['type'] as String?) == 'duel_state_sync' &&
+            onDuelGameEvent == null) {
+          pendingDuelResync.value = DuelStateSync.fromJson(payload);
+          return;
+        }
         _emitDuelGameEvent(payload);
         return;
       default:

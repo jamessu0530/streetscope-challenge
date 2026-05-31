@@ -56,12 +56,14 @@ class _GeoGuesserAppState extends State<GeoGuesserApp> {
   void initState() {
     super.initState();
     RealtimeService.instance.pendingDuelStart.addListener(_onPendingDuelStart);
+    RealtimeService.instance.pendingDuelResync.addListener(_onPendingDuelResync);
     RealtimeService.instance.incomingDuelInvite.addListener(_onIncomingInvite);
   }
 
   @override
   void dispose() {
     RealtimeService.instance.pendingDuelStart.removeListener(_onPendingDuelStart);
+    RealtimeService.instance.pendingDuelResync.removeListener(_onPendingDuelResync);
     RealtimeService.instance.incomingDuelInvite.removeListener(_onIncomingInvite);
     super.dispose();
   }
@@ -86,6 +88,22 @@ class _GeoGuesserAppState extends State<GeoGuesserApp> {
     appNavigatorKey.currentState?.push(
       MaterialPageRoute<void>(
         builder: (BuildContext context) => GamePage(settings: event.settings),
+      ),
+    );
+  }
+
+  void _onPendingDuelResync() {
+    final DuelStateSync? sync = RealtimeService.instance.pendingDuelResync.value;
+    if (sync == null) return;
+    RealtimeService.instance.pendingDuelResync.value = null;
+
+    AudioService.instance.stopHomeBgm();
+    appNavigatorKey.currentState?.push(
+      MaterialPageRoute<void>(
+        builder: (BuildContext context) => GamePage(
+          settings: sync.settings,
+          duelResume: sync.toResumeState(),
+        ),
       ),
     );
   }

@@ -15,14 +15,19 @@ Future<void> showDuelInviteDialog(
       ? '\n最多 ${invite.settings.maxMoveSteps} 步'
       : '';
 
+  final String title = invite.isRematch ? '再戰邀請' : '對戰邀請';
+  final String body = invite.isRematch
+      ? '${invite.from.displayName} 要求再戰一次'
+      : '${invite.from.displayName} 邀請你對戰';
+
   final bool? accept = await showDialog<bool>(
     context: context,
     barrierDismissible: false,
     builder: (BuildContext dialogContext) {
       return AlertDialog(
-        title: const Text('對戰邀請'),
+        title: Text(title),
         content: Text(
-          '${invite.from.displayName} 邀請你對戰\n'
+          '$body\n'
           '模式：${mode.label} · ${invite.settings.roundsPerGame} 回合 · '
           '${invite.settings.secondsPerRound} 秒$moveHint',
         ),

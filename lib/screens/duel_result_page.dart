@@ -1,10 +1,16 @@
 import 'package:flutter/material.dart';
 
+import '../models/game_mode.dart';
+import '../models/game_settings.dart';
 import '../services/audio_service.dart';
+import '../services/auth_service.dart';
+import '../services/leaderboard_service.dart';
+import '../services/realtime_service.dart';
 import '../widgets/matchday_ui.dart';
 import 'home_page.dart';
+import 'leaderboard_page.dart';
 
-class DuelResultPage extends StatelessWidget {
+class DuelResultPage extends StatefulWidget {
   const DuelResultPage({
     super.key,
     required this.myName,
@@ -13,6 +19,8 @@ class DuelResultPage extends StatelessWidget {
     required this.opponentTotal,
     this.winnerId,
     required this.myUserId,
+    required this.opponentUserId,
+    required this.rematchSettings,
   });
 
   final String myName;
@@ -21,11 +29,98 @@ class DuelResultPage extends StatelessWidget {
   final int opponentTotal;
   final String? winnerId;
   final String myUserId;
+  final String opponentUserId;
+  final GameSettings rematchSettings;
+
+  @override
+  State<DuelResultPage> createState() => _DuelResultPageState();
+}
+
+class _DuelResultPageState extends State<DuelResultPage> {
+  bool _saving = true;
+  bool _savedToCloud = false;
+  String? _saveMessage;
+  String? _savedEntryId;
+
+  bool get _canRematch =>
+      widget.opponentUserId.trim().isNotEmpty &&
+      RealtimeService.instance.canUseRealtime;
+
+  GameSettings get _rematchPayload => widget.rematchSettings.copyWith(
+        vsAi: false,
+        vsPlayer: true,
+        duelRoomId: null,
+        opponentUserId: widget.opponentUserId,
+        opponentDisplayName: widget.opponentName,
+        presetPlaces: null,
+      );
+
+  @override
+  void initState() {
+    super.initState();
+    _saveRunToLeaderboard();
+  }
+
+  Future<void> _saveRunToLeaderboard() async {
+    if (!AuthService.instance.isLoggedIn) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _savedToCloud = false;
+        _saveMessage = '未登入：本局不會寫入雲端排行榜';
+      });
+      return;
+    }
+
+    try {
+      final String? entryId = await LeaderboardService.instance.saveRunTotals(
+        totalScore: widget.myTotal,
+        rounds: widget.rematchSettings.roundsPerGame,
+        settings: widget.rematchSettings,
+      );
+      if (!mounted) return;
+      setState(() {
+        _savedEntryId = entryId;
+        _savedToCloud = entryId != null;
+        _saveMessage = '已存入雲端排行榜';
+        _saving = false;
+      });
+    } on LeaderboardException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _savedToCloud = false;
+        _saveMessage = e.message;
+        _saving = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _savedToCloud = false;
+        _saveMessage = '排行榜儲存失敗：$e';
+        _saving = false;
+      });
+    }
+  }
+
+  void _requestRematch(BuildContext context) {
+    AudioService.instance.playClick();
+    RealtimeService.instance.sendDuelInvite(
+      toUserId: widget.opponentUserId,
+      settings: _rematchPayload,
+      rematch: true,
+    );
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('已向 ${widget.opponentName} 送出再戰邀請'),
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final bool draw = winnerId == null;
-    final bool iWon = !draw && winnerId == myUserId;
+    final bool draw = widget.winnerId == null;
+    final bool iWon = !draw && widget.winnerId == widget.myUserId;
     final String headline = draw
         ? '平手！'
         : iWon
@@ -55,15 +150,91 @@ class DuelResultPage extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 24),
-              _ScoreCard(name: myName, score: myTotal, highlight: iWon || draw),
+              _ScoreCard(
+                name: widget.myName,
+                score: widget.myTotal,
+                highlight: iWon || draw,
+              ),
               const SizedBox(height: 12),
               _ScoreCard(
-                name: opponentName,
-                score: opponentTotal,
+                name: widget.opponentName,
+                score: widget.opponentTotal,
                 highlight: !draw && !iWon,
               ),
+              const SizedBox(height: 12),
+              _buildLeaderboardStatus(),
+              const SizedBox(height: 8),
+              ValueListenableBuilder<String?>(
+                valueListenable: RealtimeService.instance.duelStatusMessage,
+                builder: (BuildContext context, String? status, _) {
+                  if (status == null || status.isEmpty) {
+                    return const SizedBox.shrink();
+                  }
+                  return Text(
+                    status,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: MatchdayPalette.ink.withValues(alpha: 0.65),
+                    ),
+                  );
+                },
+              ),
               const Spacer(),
-              FilledButton(
+              if (_savedToCloud && !_saving) ...<Widget>[
+                OutlinedButton.icon(
+                  onPressed: () {
+                    AudioService.instance.playClick();
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (BuildContext context) => LeaderboardPage(
+                          highlightEntryId: _savedEntryId,
+                        ),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.leaderboard_outlined),
+                  label: const Text(
+                    '查看排行榜',
+                    style: TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: MatchdayPalette.ink,
+                    side: const BorderSide(color: MatchdayPalette.ink, width: 2),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+              if (_canRematch) ...<Widget>[
+                FilledButton.icon(
+                  onPressed: () => _requestRematch(context),
+                  icon: const Icon(Icons.replay),
+                  label: const Text(
+                    '再戰一次',
+                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                  ),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: MatchdayPalette.yellow,
+                    foregroundColor: MatchdayPalette.ink,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  '模式：${widget.rematchSettings.mode.label} · '
+                  '${widget.rematchSettings.roundsPerGame} 回合',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: MatchdayPalette.ink.withValues(alpha: 0.55),
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+              OutlinedButton(
                 onPressed: () {
                   AudioService.instance.playClick();
                   Navigator.pushAndRemoveUntil<void>(
@@ -74,9 +245,9 @@ class DuelResultPage extends StatelessWidget {
                     (Route<dynamic> r) => false,
                   );
                 },
-                style: FilledButton.styleFrom(
-                  backgroundColor: MatchdayPalette.ink,
-                  foregroundColor: MatchdayPalette.yellow,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: MatchdayPalette.ink,
+                  side: const BorderSide(color: MatchdayPalette.ink, width: 2),
                   padding: const EdgeInsets.symmetric(vertical: 16),
                 ),
                 child: const Text(
@@ -87,6 +258,48 @@ class DuelResultPage extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildLeaderboardStatus() {
+    if (_saving) {
+      return Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: <Widget>[
+          SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: MatchdayPalette.ink.withValues(alpha: 0.5),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '正在寫入排行榜…',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: MatchdayPalette.ink.withValues(alpha: 0.55),
+            ),
+          ),
+        ],
+      );
+    }
+    final String? msg = _saveMessage;
+    if (msg == null || msg.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return Text(
+      msg,
+      textAlign: TextAlign.center,
+      style: TextStyle(
+        fontSize: 12,
+        fontWeight: FontWeight.w600,
+        color: _savedToCloud
+            ? const Color(0xFF2E7D32)
+            : MatchdayPalette.ink.withValues(alpha: 0.55),
       ),
     );
   }

@@ -33,6 +33,7 @@ import '../services/meme_service.dart';
 import '../services/place_picker_service.dart';
 import '../services/realtime_service.dart';
 import 'duel_result_page.dart';
+import 'home_page.dart';
 import '../utils/map_utils.dart';
 import '../widgets/countdown_timer_widget.dart';
 import '../widgets/guess_map.dart';
@@ -42,10 +43,12 @@ import 'result_page.dart';
 
 class GamePage extends StatefulWidget {
   final GameSettings settings;
+  final DuelResumeState? duelResume;
 
   const GamePage({
     super.key,
     this.settings = const GameSettings(),
+    this.duelResume,
   });
 
   @override
@@ -96,6 +99,8 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   bool _duelCanAdvance = false;
   int? _duelOpponentScore;
   double? _duelOpponentDistanceKm;
+  bool _duelCancelledHandled = false;
+  bool _waitingForOpponentReconnect = false;
 
   bool get _vsPlayer => widget.settings.vsPlayer;
 
@@ -187,25 +192,128 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
       if (!_submitted || !_duelCanAdvance || finishedRound != _currentRound) {
         return;
       }
+      if (_waitingForOpponentReconnect) return;
       if (_currentRound >= (_places?.length ?? 0) - 1) return;
       _advanceToNextRound();
       return;
     }
+
+    if (type == 'duel_opponent_disconnected') {
+      if (!mounted) return;
+      setState(() => _waitingForOpponentReconnect = true);
+      return;
+    }
+
+    if (type == 'duel_opponent_reconnected') {
+      if (!mounted) return;
+      setState(() => _waitingForOpponentReconnect = false);
+      return;
+    }
+
+    if (type == 'duel_state_sync') {
+      if (!mounted) return;
+      _applyDuelResume(DuelStateSync.fromJson(payload).toResumeState());
+      return;
+    }
+
+    if (type == 'duel_cancelled') {
+      final String reason = (payload['reason'] as String?) ?? '';
+      if (reason != 'opponent_left') return;
+      if (_duelCancelledHandled || !mounted) return;
+      _duelCancelledHandled = true;
+      final String oppName = widget.settings.opponentDisplayName ?? '對手';
+      unawaited(_showDuelEndedDialog('$oppName 已退出對戰'));
+      return;
+    }
+  }
+
+  void _applyDuelResume(DuelResumeState resume) {
+    if (_places == null || _places!.isEmpty) return;
+    setState(() {
+      _currentRound = resume.round.clamp(0, _places!.length - 1);
+      _submitted = resume.submitted;
+      _duelCanAdvance = resume.duelCanAdvance;
+      _duelOpponentSubmitted = resume.duelOpponentSubmitted;
+      _duelOpponentScore = resume.duelOpponentScore;
+      _duelOpponentDistanceKm = resume.duelOpponentDistanceKm;
+      _waitingForOpponentReconnect = resume.waitingForOpponentReconnect;
+      if (resume.submitted) {
+        _mapOverlayOpen = true;
+        if (resume.myScore != null) {
+          final Place place = _places![_currentRound];
+          final GuessResult restored = GuessResult(
+            correctPlace: place,
+            guessed: _guessedLocation,
+            distanceKm: resume.myDistanceKm,
+            score: resume.myScore!,
+          );
+          if (_results.length > _currentRound) {
+            _results[_currentRound] = restored;
+          } else {
+            while (_results.length < _currentRound) {
+              _results.add(GuessResult.noAnswer(_places![_results.length]));
+            }
+            _results.add(restored);
+          }
+        }
+      }
+    });
+  }
+
+  Future<void> _showDuelEndedDialog(String message) async {
+    if (!mounted) return;
+    RealtimeService.instance.unbindDuelGameHandler();
+    AudioService.instance.stopAllInGameBgm();
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: const Text('對戰結束'),
+          content: Text(message),
+          actions: <Widget>[
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('確定'),
+            ),
+          ],
+        );
+      },
+    );
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil<void>(
+      context,
+      MaterialPageRoute<void>(
+        builder: (BuildContext context) => const HomePage(),
+      ),
+      (Route<dynamic> route) => false,
+    );
   }
 
   void _finishDuelMatch(DuelRoundComplete complete, String myId) {
     int myTotal = 0;
     int oppTotal = 0;
     String oppName = widget.settings.opponentDisplayName ?? '對手';
+    String? oppUserId = widget.settings.opponentUserId;
     for (final DuelRoundPlayerResult t in complete.totals) {
       if (t.id == myId) {
         myTotal = t.score;
       } else {
         oppTotal = t.score;
         oppName = t.displayName;
+        oppUserId = t.id;
       }
     }
     final AuthUser? me = AuthService.instance.currentUser.value;
+    final GameSettings rematchSettings = widget.settings.copyWith(
+      vsAi: false,
+      vsPlayer: true,
+      duelRoomId: null,
+      opponentUserId: oppUserId,
+      opponentDisplayName: oppName,
+      presetPlaces: null,
+    );
+    RealtimeService.instance.unbindDuelGameHandler();
     Navigator.pushReplacement(
       context,
       MaterialPageRoute<void>(
@@ -216,6 +324,8 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
           opponentTotal: oppTotal,
           winnerId: complete.winnerId,
           myUserId: myId,
+          opponentUserId: oppUserId ?? '',
+          rematchSettings: rematchSettings,
         ),
       ),
     );
@@ -228,6 +338,9 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         if (!mounted) return;
         setState(() => _places = List<Place>.from(preset));
         _resetMoveTrailForRound(_currentRound);
+        if (widget.duelResume != null) {
+          _applyDuelResume(widget.duelResume!);
+        }
         return;
       }
       final List<Place> picked = await generateRandomPlaces(
@@ -586,6 +699,13 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   }
 
   void _goToNextRoundOrFinish() {
+    if (_vsPlayer && _waitingForOpponentReconnect) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('等待對手重新連線…')),
+      );
+      return;
+    }
+
     if (_vsPlayer && !_duelCanAdvance) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('等待對手完成本回合…')),
@@ -734,13 +854,59 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
                 outcome: _memeOutcome,
                 onDismiss: _dismissMeme,
               ),
+            if (_vsPlayer && _waitingForOpponentReconnect)
+              _DuelReconnectBanner(
+                opponentName: widget.settings.opponentDisplayName ?? '對手',
+                onExit: _exitDuel,
+              ),
           ],
         ),
       ),
     );
   }
 
+  Future<void> _exitDuel() async {
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: const Text('退出對戰'),
+          content: const Text('確定要退出這場對戰嗎？'),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('退出'),
+            ),
+          ],
+        );
+      },
+    );
+    if (ok != true || !mounted) return;
+
+    final String? roomId = widget.settings.duelRoomId?.trim();
+    if (roomId != null && roomId.isNotEmpty) {
+      RealtimeService.instance.leaveDuel(roomId: roomId);
+    }
+    RealtimeService.instance.unbindDuelGameHandler();
+    AudioService.instance.stopAllInGameBgm();
+    Navigator.pushAndRemoveUntil<void>(
+      context,
+      MaterialPageRoute<void>(
+        builder: (BuildContext context) => const HomePage(),
+      ),
+      (Route<dynamic> route) => false,
+    );
+  }
+
   Future<void> _handleBackTap() async {
+    if (_vsPlayer) {
+      await _exitDuel();
+      return;
+    }
     final bool leave = await _confirmExit();
     if (!leave) return;
     if (!mounted) return;
@@ -748,13 +914,16 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   }
 
   Future<bool> _confirmExit() async {
+    final String content = _vsPlayer
+        ? '確定要退出這場對戰嗎？'
+        : '目前進度尚未完成，離開後本場成績不會記錄。';
     final bool? ok = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (BuildContext ctx) {
         return AlertDialog(
-          title: const Text('離開遊戲？'),
-          content: const Text('目前進度尚未完成，離開後本場成績不會記錄。'),
+          title: Text(_vsPlayer ? '退出對戰？' : '離開遊戲？'),
+          content: Text(content),
           actions: <Widget>[
             TextButton(
               onPressed: () => Navigator.pop(ctx, false),
@@ -1830,6 +1999,69 @@ class _ResultStrip extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _DuelReconnectBanner extends StatelessWidget {
+  const _DuelReconnectBanner({
+    required this.opponentName,
+    required this.onExit,
+  });
+
+  final String opponentName;
+  final VoidCallback onExit;
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      left: 16,
+      right: 16,
+      bottom: 24,
+      child: Material(
+        color: Colors.black.withValues(alpha: 0.88),
+        borderRadius: BorderRadius.circular(14),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      '等待 $opponentName 重新連線…',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton(
+                onPressed: onExit,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  side: const BorderSide(color: Colors.white54),
+                ),
+                child: const Text('退出對戰'),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
