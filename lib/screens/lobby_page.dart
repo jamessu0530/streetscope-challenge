@@ -6,6 +6,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../data/game_constants.dart';
 import '../models/auth_user.dart';
 import '../models/game_mode.dart';
 import '../models/game_settings.dart';
@@ -66,11 +67,17 @@ class _LobbyPageState extends State<LobbyPage> {
     _chatController.clear();
   }
 
-  GameSettings _duelSettingsForMode(GameMode mode) {
+  GameSettings _duelSettingsForMode(GameMode mode, {required bool entertainment}) {
+    int seconds = widget.lobbySettings.secondsPerRound;
+    if (entertainment && seconds < kMinSecondsPerRoundEntertainment) {
+      seconds = kMinSecondsPerRoundEntertainment;
+    }
     return widget.lobbySettings.copyWith(
       mode: mode,
       vsAi: false,
       vsPlayer: true,
+      entertainmentMode: entertainment,
+      secondsPerRound: seconds,
       maxMoveSteps: mode == GameMode.move ? widget.lobbySettings.maxMoveSteps : 0,
     );
   }
@@ -78,13 +85,17 @@ class _LobbyPageState extends State<LobbyPage> {
   Future<void> _challengePlayer(OnlinePlayer target) async {
     AudioService.instance.playClick();
     GameMode selectedMode = GameMode.picture;
+    bool entertainmentMode = false;
 
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext dialogContext) {
         return StatefulBuilder(
           builder: (BuildContext context, StateSetter setDialogState) {
-            final GameSettings preview = _duelSettingsForMode(selectedMode);
+            final GameSettings preview = _duelSettingsForMode(
+              selectedMode,
+              entertainment: entertainmentMode,
+            );
             final String moveHint = selectedMode == GameMode.move &&
                     preview.maxMoveSteps > 0
                 ? '\n最多 ${preview.maxMoveSteps} 步'
@@ -120,6 +131,23 @@ class _LobbyPageState extends State<LobbyPage> {
                         dense: true,
                       ),
                     const SizedBox(height: 8),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text(
+                        '娛樂模式',
+                        style: TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                      subtitle: const Text(
+                        '每回合 AI 建議（使用後該回合分數折半）\n'
+                        '至少 ${kMinSecondsPerRoundEntertainment} 秒 · 不計排行榜',
+                        style: TextStyle(fontSize: 11, height: 1.35),
+                      ),
+                      value: entertainmentMode,
+                      onChanged: (bool value) {
+                        setDialogState(() => entertainmentMode = value);
+                      },
+                    ),
+                    const SizedBox(height: 4),
                     Text(
                       '${preview.roundsPerGame} 回合 · '
                       '${preview.secondsPerRound} 秒$moveHint',
@@ -149,7 +177,10 @@ class _LobbyPageState extends State<LobbyPage> {
     if (ok != true) return;
     RealtimeService.instance.sendDuelInvite(
       toUserId: target.id,
-      settings: _duelSettingsForMode(selectedMode),
+      settings: _duelSettingsForMode(
+        selectedMode,
+        entertainment: entertainmentMode,
+      ),
     );
   }
 

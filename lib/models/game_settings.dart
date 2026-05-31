@@ -33,6 +33,9 @@ class GameSettings {
   /// 房主產生的共用題目；有值時 GamePage 不再自行抽題。
   final List<Place>? presetPlaces;
 
+  /// 好友對戰娛樂模式：可用 AI 建議（使用後該回合折半）、不寫入排行榜。
+  final bool entertainmentMode;
+
   const GameSettings({
     this.mode = GameMode.move,
     this.region = GameRegion.world,
@@ -46,6 +49,7 @@ class GameSettings {
     this.opponentUserId,
     this.opponentDisplayName,
     this.presetPlaces,
+    this.entertainmentMode = false,
   });
 
   GameSettings copyWith({
@@ -61,6 +65,7 @@ class GameSettings {
     String? opponentUserId,
     String? opponentDisplayName,
     List<Place>? presetPlaces,
+    bool? entertainmentMode,
   }) {
     return GameSettings(
       mode: mode ?? this.mode,
@@ -76,6 +81,7 @@ class GameSettings {
       opponentDisplayName:
           opponentDisplayName ?? this.opponentDisplayName,
       presetPlaces: presetPlaces ?? this.presetPlaces,
+      entertainmentMode: entertainmentMode ?? this.entertainmentMode,
     );
   }
 
@@ -85,6 +91,7 @@ class GameSettings {
         'secondsPerRound': secondsPerRound,
         'roundsPerGame': roundsPerGame,
         'maxMoveSteps': maxMoveSteps,
+        'entertainmentMode': entertainmentMode,
       };
 }
 
@@ -109,5 +116,6 @@ GameSettings duelSettingsFromJson(Map<String, dynamic> json) {
     secondsPerRound: (json['secondsPerRound'] as num?)?.toInt() ?? kSecondsPerRound,
     roundsPerGame: (json['roundsPerGame'] as num?)?.toInt() ?? kRoundsPerGame,
     maxMoveSteps: (json['maxMoveSteps'] as num?)?.toInt() ?? 0,
+    entertainmentMode: json['entertainmentMode'] == true,
   );
 }

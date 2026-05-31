@@ -5,6 +5,8 @@
 const int kRoundsPerGame = 5;
 const int kSecondsPerRound = 30;
 const int kMinSecondsPerRound = 30;
+/// 娛樂模式（好友對戰 + AI 道具）每回合至少 60 秒。
+const int kMinSecondsPerRoundEntertainment = 60;
 const int kMaxSecondsPerRound = 120;
 
 /// 首頁可選回合數清單（短局到長局都能玩）。

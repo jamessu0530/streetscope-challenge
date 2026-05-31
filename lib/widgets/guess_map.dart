@@ -19,6 +19,9 @@ class GuessMap extends StatefulWidget {
   /// AI 對手的猜測位置（送出後才會顯示）。
   final LatLng? aiLocation;
 
+  /// 娛樂模式：AI 道具建議點（僅參考，玩家可自行選點）。
+  final LatLng? aiHintLocation;
+
   /// 外層圓角。全螢幕地圖 overlay 會傳 0 避免四角留白。
   final double cornerRadius;
 
@@ -33,6 +36,7 @@ class GuessMap extends StatefulWidget {
     this.guessedLocation,
     this.correctLocation,
     this.aiLocation,
+    this.aiHintLocation,
     this.cornerRadius = 12,
     this.bottomInset = 16,
   });
@@ -127,6 +131,32 @@ class _GuessMapState extends State<GuessMap> {
           infoWindow: const InfoWindow(title: 'AI 的猜測'),
         ),
       );
+    }
+
+    if (!widget.locked && widget.aiHintLocation != null) {
+      markers.add(
+        Marker(
+          markerId: const MarkerId('ai_hint'),
+          position: widget.aiHintLocation!,
+          icon: BitmapDescriptor.defaultMarkerWithHue(
+            BitmapDescriptor.hueOrange,
+          ),
+          infoWindow: const InfoWindow(title: 'AI 建議'),
+        ),
+      );
+      if (widget.guessedLocation != null) {
+        polylines.add(
+          Polyline(
+            polylineId: const PolylineId('guess_to_ai_hint'),
+            color: const Color(0xFFFF7A1A),
+            width: 2,
+            points: <LatLng>[
+              widget.guessedLocation!,
+              widget.aiHintLocation!,
+            ],
+          ),
+        );
+      }
     }
 
     return ClipRRect(

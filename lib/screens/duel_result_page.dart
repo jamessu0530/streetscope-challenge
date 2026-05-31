@@ -63,22 +63,29 @@ class _DuelResultPageState extends State<DuelResultPage> {
   }
 
   Future<void> _saveRunToLeaderboard() async {
+    final bool funMode = widget.rematchSettings.entertainmentMode;
+
     if (!AuthService.instance.isLoggedIn) {
       if (!mounted) return;
       setState(() {
         _saving = false;
         _savedToCloud = false;
-        _saveMessage = '未登入：本局不會寫入雲端排行榜';
+        _saveMessage = funMode
+            ? '娛樂模式不計排行榜'
+            : '未登入：本局不會寫入雲端排行榜';
       });
       return;
     }
 
     try {
-      final String? entryId = await LeaderboardService.instance.saveRunTotals(
-        totalScore: widget.myTotal,
-        rounds: widget.rematchSettings.roundsPerGame,
-        settings: widget.rematchSettings,
-      );
+      String? entryId;
+      if (!funMode) {
+        entryId = await LeaderboardService.instance.saveRunTotals(
+          totalScore: widget.myTotal,
+          rounds: widget.rematchSettings.roundsPerGame,
+          settings: widget.rematchSettings,
+        );
+      }
       await PlayHistoryService.instance.recordFriendDuel(
         myTotal: widget.myTotal,
         opponentTotal: widget.opponentTotal,
@@ -91,8 +98,10 @@ class _DuelResultPageState extends State<DuelResultPage> {
       if (!mounted) return;
       setState(() {
         _savedEntryId = entryId;
-        _savedToCloud = entryId != null;
-        _saveMessage = '已存入雲端排行榜';
+        _savedToCloud = !funMode && entryId != null;
+        _saveMessage = funMode
+            ? '娛樂模式：不計入排行榜（已寫入遊玩紀錄）'
+            : '已存入雲端排行榜';
         _saving = false;
       });
     } on LeaderboardException catch (e) {
@@ -129,6 +138,7 @@ class _DuelResultPageState extends State<DuelResultPage> {
 
   @override
   Widget build(BuildContext context) {
+    final bool funMode = widget.rematchSettings.entertainmentMode;
     final bool draw = widget.winnerId == null;
     final bool iWon = !draw && widget.winnerId == widget.myUserId;
     final String headline = draw
@@ -145,9 +155,11 @@ class _DuelResultPageState extends State<DuelResultPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              const MatchdayTopTicker(
+              MatchdayTopTicker(
                 label: 'DUEL · FINISHED',
-                trailing: 'VS PLAYER',
+                trailing: widget.rematchSettings.entertainmentMode
+                    ? 'FUN MODE'
+                    : 'VS PLAYER',
               ),
               const SizedBox(height: 32),
               Text(
@@ -160,6 +172,19 @@ class _DuelResultPageState extends State<DuelResultPage> {
                 ),
               ),
               const SizedBox(height: 24),
+              if (funMode)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Text(
+                    '娛樂模式 · 不計入排行榜',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: MatchdayPalette.ink.withValues(alpha: 0.55),
+                    ),
+                  ),
+                ),
               _ScoreCard(
                 name: widget.myName,
                 score: widget.myTotal,
@@ -192,7 +217,7 @@ class _DuelResultPageState extends State<DuelResultPage> {
                 },
               ),
               const Spacer(),
-              if (_savedToCloud && !_saving) ...<Widget>[
+              if (_savedToCloud && !_saving && !widget.rematchSettings.entertainmentMode) ...<Widget>[
                 OutlinedButton.icon(
                   onPressed: () {
                     AudioService.instance.playClick();

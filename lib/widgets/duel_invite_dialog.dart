@@ -19,6 +19,9 @@ Future<void> showDuelInviteDialog(
   final String body = invite.isRematch
       ? '${invite.from.displayName} 要求再戰一次'
       : '${invite.from.displayName} 邀請你對戰';
+  final String funLine = invite.settings.entertainmentMode
+      ? '\n娛樂模式 · AI 建議（使用折半）· 不計排行榜'
+      : '';
 
   final bool? accept = await showDialog<bool>(
     context: context,
@@ -29,7 +32,7 @@ Future<void> showDuelInviteDialog(
         content: Text(
           '$body\n'
           '模式：${mode.label} · ${invite.settings.roundsPerGame} 回合 · '
-          '${invite.settings.secondsPerRound} 秒$moveHint',
+          '${invite.settings.secondsPerRound} 秒$moveHint$funLine',
         ),
         actions: <Widget>[
           TextButton(
