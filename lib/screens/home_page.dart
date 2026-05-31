@@ -18,7 +18,6 @@ import 'package:flutter/material.dart';
 
 import '../data/game_constants.dart';
 import '../models/auth_user.dart';
-import '../models/game_mode.dart';
 import '../models/game_region.dart';
 import '../models/game_settings.dart';
 import '../models/online_player.dart';
@@ -30,6 +29,7 @@ import 'change_password_page.dart';
 import '../services/realtime_service.dart';
 import 'lobby_page.dart';
 import 'login_page.dart';
+import 'play_history_page.dart';
 import 'mode_selection_page.dart';
 
 class HomePage extends StatefulWidget {
@@ -960,6 +960,22 @@ class _LoggedInPill extends StatelessWidget {
           ),
         ),
         const PopupMenuDivider(),
+        const PopupMenuItem<String>(
+          value: 'history',
+          child: Row(
+            children: <Widget>[
+              Icon(Icons.history, size: 16, color: MatchdayPalette.ink),
+              SizedBox(width: 8),
+              Text(
+                '遊玩紀錄',
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  color: MatchdayPalette.ink,
+                ),
+              ),
+            ],
+          ),
+        ),
         if (user.provider == AuthProvider.email &&
             AuthService.instance.accessToken != null)
           const PopupMenuItem<String>(
@@ -996,6 +1012,13 @@ class _LoggedInPill extends StatelessWidget {
         ),
       ],
     );
+    if (choice == 'history' && context.mounted) {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (BuildContext _) => const PlayHistoryPage(),
+        ),
+      );
+    }
     if (choice == 'password' && context.mounted) {
       await Navigator.of(context).push(
         MaterialPageRoute<void>(

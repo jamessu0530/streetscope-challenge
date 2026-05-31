@@ -132,6 +132,46 @@ class LeaderboardEntryPublic(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class PlayHistorySubmitRequest(BaseModel):
+    total_score: int = Field(ge=0, alias="totalScore")
+    rounds: int = Field(ge=1, alias="rounds")
+    seconds_per_round: int = Field(ge=1, alias="secondsPerRound")
+    mode: str
+    region: str
+    play_type: str = Field(alias="playType")
+    opponent_user_id: str | None = Field(default=None, alias="opponentUserId")
+    opponent_display_name: str | None = Field(
+        default=None, alias="opponentDisplayName"
+    )
+    opponent_score: int | None = Field(default=None, alias="opponentScore")
+    won: bool | None = None
+    ai_strength: str | None = Field(default=None, alias="aiStrength")
+
+    model_config = {"populate_by_name": True}
+
+
+class PlayHistoryEntryPublic(BaseModel):
+    id: str
+    user_id: str = Field(alias="userId")
+    display_name: str = Field(alias="displayName")
+    total_score: int = Field(alias="totalScore")
+    rounds: int
+    seconds_per_round: int = Field(alias="secondsPerRound")
+    mode: str
+    region: str
+    play_type: str = Field(alias="playType")
+    opponent_user_id: str | None = Field(default=None, alias="opponentUserId")
+    opponent_display_name: str | None = Field(
+        default=None, alias="opponentDisplayName"
+    )
+    opponent_score: int | None = Field(default=None, alias="opponentScore")
+    won: bool | None = None
+    ai_strength: str | None = Field(default=None, alias="aiStrength")
+    played_at: datetime = Field(alias="playedAt")
+
+    model_config = {"populate_by_name": True}
+
+
 class AiGuessRequest(BaseModel):
     pano_id: str | None = Field(
         default=None,

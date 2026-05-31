@@ -16,6 +16,7 @@ import '../models/guess_result.dart';
 import '../services/audio_service.dart';
 import '../services/auth_service.dart';
 import '../services/leaderboard_service.dart';
+import '../services/play_history_service.dart';
 import '../utils/score_utils.dart';
 import 'home_page.dart';
 import 'leaderboard_page.dart';
@@ -117,6 +118,12 @@ class _ResultPageState extends State<ResultPage>
       final String? entryId = await LeaderboardService.instance.saveRun(
         results: widget.results,
         settings: widget.settings,
+      );
+      await PlayHistoryService.instance.recordSoloOrAi(
+        totalScore: _totalScore,
+        settings: widget.settings,
+        vsAi: _vsAi,
+        opponentScore: _vsAi ? _aiTotalScore : null,
       );
       if (!mounted) return;
       setState(() {

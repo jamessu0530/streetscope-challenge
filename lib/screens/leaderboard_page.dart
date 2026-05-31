@@ -94,7 +94,10 @@ class _LeaderboardPageState extends State<LeaderboardPage>
         LeaderboardEntry? latestMe;
         for (final LeaderboardEntry e in all) {
           if (!e.isMe) continue;
-          if (latestMe == null || e.playedAt.isAfter(latestMe.playedAt)) {
+          if (latestMe == null ||
+              e.totalScore > latestMe.totalScore ||
+              (e.totalScore == latestMe.totalScore &&
+                  e.playedAt.isAfter(latestMe.playedAt))) {
             latestMe = e;
           }
         }
@@ -125,13 +128,31 @@ class _LeaderboardPageState extends State<LeaderboardPage>
     }
   }
 
+  static List<LeaderboardEntry> _dedupeBestPerUser(
+    Iterable<LeaderboardEntry> entries,
+  ) {
+    final Map<String, LeaderboardEntry> best = <String, LeaderboardEntry>{};
+    for (final LeaderboardEntry e in entries) {
+      if (e.userId.isEmpty) continue;
+      final LeaderboardEntry? prev = best[e.userId];
+      if (prev == null ||
+          e.totalScore > prev.totalScore ||
+          (e.totalScore == prev.totalScore &&
+              e.playedAt.isAfter(prev.playedAt))) {
+        best[e.userId] = e;
+      }
+    }
+    return best.values.toList();
+  }
+
   List<LeaderboardEntry> get _rows {
     final Iterable<LeaderboardEntry> filtered = _all.where((LeaderboardEntry e) {
       final bool modeOk = _modeFilter == null || e.mode == _modeFilter;
       final bool regionOk = _regionFilter == null || e.region == _regionFilter;
       return modeOk && regionOk;
     });
-    final List<LeaderboardEntry> rows = filtered.toList();
+    final List<LeaderboardEntry> rows =
+        _dedupeBestPerUser(filtered);
     if (_tab == _Tab.top) {
       rows.sort((LeaderboardEntry a, LeaderboardEntry b) {
         final int scoreCmp = b.totalScore.compareTo(a.totalScore);

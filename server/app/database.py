@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from pymongo import ASCENDING, MongoClient
+from pymongo import ASCENDING, DESCENDING, MongoClient
 from pymongo.collection import Collection
 from pymongo.database import Database
 
@@ -30,8 +30,69 @@ def leaderboard_collection() -> Collection:
     return get_db()["leaderboard_entries"]
 
 
+def play_history_collection() -> Collection:
+    return get_db()["play_history_entries"]
+
+
 def memes_collection() -> Collection:
     return get_db()["user_memes"]
+
+
+def _ensure_named_index(
+    col: Collection,
+    keys: list,
+    name: str,
+    **kwargs,
+) -> None:
+    """建立索引；若同名索引的 key 定義不同，先刪除再重建（避免 IndexKeySpecsConflict）。"""
+    requested = list(keys)
+    try:
+        info = col.index_information()
+    except Exception:
+        info = {}
+    if name in info:
+        existing = list(info[name]["key"])
+        if existing != requested:
+            col.drop_index(name)
+    col.create_index(requested, name=name, **kwargs)
+
+
+def _collapse_leaderboard_duplicates(lb: Collection) -> None:
+    """合併舊資料：每個 (userId, mode, region) 只留最高分一筆。"""
+    pipeline = [
+        {
+            "$group": {
+                "_id": {
+                    "userId": "$userId",
+                    "mode": "$mode",
+                    "region": "$region",
+                },
+                "docs": {
+                    "$push": {
+                        "id": "$_id",
+                        "totalScore": "$totalScore",
+                        "playedAt": "$playedAt",
+                    }
+                },
+                "count": {"$sum": 1},
+            }
+        },
+        {"$match": {"count": {"$gt": 1}}},
+    ]
+    for group in lb.aggregate(pipeline):
+        docs = group["docs"]
+
+        def _sort_key(item: dict) -> tuple[int, float]:
+            score = int(item.get("totalScore") or 0)
+            played = item.get("playedAt")
+            ts = 0.0
+            if isinstance(played, datetime):
+                ts = as_utc_aware(played).timestamp()
+            return (score, ts)
+
+        docs.sort(key=_sort_key, reverse=True)
+        for duplicate in docs[1:]:
+            lb.delete_one({"_id": duplicate["id"]})
 
 
 def ensure_indexes() -> None:
@@ -66,11 +127,27 @@ def ensure_indexes() -> None:
     lb = leaderboard_collection()
     if LEADERBOARD_CLEAR_ON_START:
         lb.delete_many({})
-    lb.create_index([("playedAt", ASCENDING)], name="leaderboard_played_at")
-    lb.create_index([("totalScore", ASCENDING)], name="leaderboard_total_score")
-    lb.create_index([("userId", ASCENDING), ("playedAt", ASCENDING)], name="leaderboard_user_played")
-    lb.create_index([("mode", ASCENDING)], name="leaderboard_mode")
-    lb.create_index([("region", ASCENDING)], name="leaderboard_region")
+    else:
+        _collapse_leaderboard_duplicates(lb)
+    _ensure_named_index(lb, [("playedAt", ASCENDING)], name="leaderboard_played_at")
+    _ensure_named_index(
+        lb, [("totalScore", ASCENDING)], name="leaderboard_total_score"
+    )
+    _ensure_named_index(lb, [("mode", ASCENDING)], name="leaderboard_mode")
+    _ensure_named_index(lb, [("region", ASCENDING)], name="leaderboard_region")
+    _ensure_named_index(
+        lb,
+        [("userId", ASCENDING), ("mode", ASCENDING), ("region", ASCENDING)],
+        name="leaderboard_user_mode_region_unique",
+        unique=True,
+    )
+
+    ph = play_history_collection()
+    _ensure_named_index(
+        ph,
+        [("userId", ASCENDING), ("playedAt", DESCENDING)],
+        name="play_history_user_played",
+    )
 
     memes = memes_collection()
     if MEME_CLEAR_ON_START:

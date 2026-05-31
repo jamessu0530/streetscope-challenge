@@ -5,6 +5,7 @@ import '../models/game_settings.dart';
 import '../services/audio_service.dart';
 import '../services/auth_service.dart';
 import '../services/leaderboard_service.dart';
+import '../services/play_history_service.dart';
 import '../services/realtime_service.dart';
 import '../widgets/matchday_ui.dart';
 import 'home_page.dart';
@@ -77,6 +78,15 @@ class _DuelResultPageState extends State<DuelResultPage> {
         totalScore: widget.myTotal,
         rounds: widget.rematchSettings.roundsPerGame,
         settings: widget.rematchSettings,
+      );
+      await PlayHistoryService.instance.recordFriendDuel(
+        myTotal: widget.myTotal,
+        opponentTotal: widget.opponentTotal,
+        settings: widget.rematchSettings,
+        opponentUserId: widget.opponentUserId,
+        opponentDisplayName: widget.opponentName,
+        winnerId: widget.winnerId,
+        myUserId: widget.myUserId,
       );
       if (!mounted) return;
       setState(() {
