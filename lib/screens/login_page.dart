@@ -1,5 +1,5 @@
 // =============================================================================
-// LoginPage — Email / Google / Facebook / GitHub 接 FastAPI。
+// LoginPage — 四種登入：Email、Google（Gmail）、Facebook、GitHub → FastAPI。
 // =============================================================================
 
 import 'package:flutter/material.dart';
@@ -39,6 +39,46 @@ class _LoginPageState extends State<LoginPage> {
     super.dispose();
   }
 
+  static bool _isUnregisteredEmailError(String message) {
+    final String m = message.trim();
+    if (m.isEmpty) return false;
+    // 社群帳號、密碼錯誤等訊息不要誤切到註冊。
+    if (m.contains('已使用') || m.contains('密碼錯誤') || m.contains('忘記密碼')) {
+      return false;
+    }
+    return m.contains('尚未註冊');
+  }
+
+  Future<void> _finishSignIn(
+    AuthUser user, {
+    String Function(AuthUser user)? successMessage,
+  }) async {
+    if (!mounted) return;
+    if (user.needsNicknameSetup) {
+      final bool ready = await ensureNicknameSetup(context);
+      if (!mounted) return;
+      if (!ready) {
+        await AuthService.instance.signOut();
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('請完成遊戲暱稱設定後再登入')),
+        );
+        return;
+      }
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          successMessage?.call(AuthService.instance.currentUser.value ?? user) ??
+              '歡迎，${(AuthService.instance.currentUser.value ?? user).displayName}',
+        ),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+    Navigator.of(context).pop(true);
+  }
+
   Future<void> _runSignIn(
     AuthProvider provider,
     Future<AuthUser> Function() action, {
@@ -49,32 +89,50 @@ class _LoginPageState extends State<LoginPage> {
     setState(() => _busy = provider);
     try {
       final AuthUser user = await action();
-      if (!mounted) return;
-      if (user.needsNicknameSetup) {
-        final bool ready = await ensureNicknameSetup(context);
-        if (!mounted) return;
-        if (!ready) {
-          await AuthService.instance.signOut();
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('請完成遊戲暱稱設定後再登入')),
-          );
-          return;
-        }
-      }
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            successMessage?.call(AuthService.instance.currentUser.value ?? user) ??
-                '歡迎，${(AuthService.instance.currentUser.value ?? user).displayName}',
-          ),
-          duration: const Duration(seconds: 2),
-        ),
-      );
-      Navigator.of(context).pop(true);
+      await _finishSignIn(user, successMessage: successMessage);
     } on AuthException catch (e) {
       if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message)),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('登入失敗：$e')),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = null);
+    }
+  }
+
+  /// 僅 Email 密碼登入：帳號不存在時切換到註冊表單（社群登入無此流程）。
+  Future<void> _loginWithEmailPassword({
+    required String email,
+    required String password,
+  }) async {
+    if (_busy != null) return;
+    AudioService.instance.playClick();
+    setState(() => _busy = AuthProvider.email);
+    try {
+      final AuthUser user = await AuthService.instance.loginWithEmail(
+        email: email,
+        password: password,
+      );
+      await _finishSignIn(user);
+    } on AuthException catch (e) {
+      if (!mounted) return;
+      if (_isUnregisteredEmailError(e.message)) {
+        setState(() => _isRegister = true);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              '此 Email 尚未註冊，已切換到註冊模式，請填寫暱稱後送出。',
+            ),
+            duration: Duration(seconds: 4),
+          ),
+        );
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(e.message)),
       );
@@ -126,13 +184,7 @@ class _LoginPageState extends State<LoginPage> {
             '註冊成功，已為 ${user.displayName} 自動登入',
       );
     } else {
-      _runSignIn(
-        AuthProvider.email,
-        () => AuthService.instance.loginWithEmail(
-          email: email,
-          password: password,
-        ),
-      );
+      _loginWithEmailPassword(email: email, password: password);
     }
   }
 
@@ -264,7 +316,8 @@ class _Header extends StatelessWidget {
           const Padding(
             padding: EdgeInsets.symmetric(horizontal: 12),
             child: Text(
-              'Email / Google / Facebook / GitHub 登入會寫入 MongoDB 雲端帳號。',
+              '四種登入：Email、Google（Gmail）、Facebook、GitHub。'
+              '帳號資料寫入 MongoDB 雲端。',
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,

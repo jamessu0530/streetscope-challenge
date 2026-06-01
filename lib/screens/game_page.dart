@@ -108,6 +108,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   bool _aiSuggestedGuess = false;
   LatLng? _aiHintLocation;
   String? _aiHintReasoning;
+  double? _aiHintConfidence;
 
   bool get _vsPlayer => widget.settings.vsPlayer;
 
@@ -562,6 +563,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
       _aiHintConsumedThisRound = true;
       _aiHintLocation = hint.location;
       _aiHintReasoning = hint.reasoning?.trim();
+      _aiHintConfidence = hint.confidence;
       _guessedLocation = hint.location;
       _aiSuggestedGuess = true;
       _mapOverlayOpen = true;
@@ -853,6 +855,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
       _aiSuggestedGuess = false;
       _aiHintLocation = null;
       _aiHintReasoning = null;
+      _aiHintConfidence = null;
     });
     AudioService.instance.stopAllInGameBgm();
     _resetMoveTrailForRound(_currentRound);
@@ -923,7 +926,10 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
                 aiSuggestedGuess:
                     _entertainmentDuel && !_submitted && _aiSuggestedGuess,
                 aiHintReasoning:
-                    _entertainmentDuel && !_submitted ? _aiHintReasoning : null,
+                    _entertainmentDuel ? _aiHintReasoning : null,
+                aiHintConfidence: _entertainmentDuel ? _aiHintConfidence : null,
+                entertainmentAiHintLocation:
+                    _entertainmentDuel ? _aiHintLocation : null,
                 aiHintHalvesScore: _entertainmentDuel && _aiHintConsumedThisRound,
                 onMapCreated: (GoogleMapController c) {
                   _mapController = c;
@@ -1403,6 +1409,8 @@ class _MapOverlay extends StatelessWidget {
   final double? aiConfidence;
   final bool aiSuggestedGuess;
   final String? aiHintReasoning;
+  final double? aiHintConfidence;
+  final LatLng? entertainmentAiHintLocation;
   final bool aiHintHalvesScore;
   final ValueChanged<GoogleMapController> onMapCreated;
   final ValueChanged<LatLng> onGuessChanged;
@@ -1430,6 +1438,8 @@ class _MapOverlay extends StatelessWidget {
     required this.aiConfidence,
     this.aiSuggestedGuess = false,
     this.aiHintReasoning,
+    this.aiHintConfidence,
+    this.entertainmentAiHintLocation,
     this.aiHintHalvesScore = false,
     required this.onMapCreated,
     required this.onGuessChanged,
@@ -1509,9 +1519,27 @@ class _MapOverlay extends StatelessWidget {
                         reasoning: aiHintReasoning,
                         halvesScore: aiHintHalvesScore,
                         aiSuggestedGuess: aiSuggestedGuess,
+                        confidence: aiHintConfidence,
+                        hintOnlySheet: true,
                       ),
                     if (showAiHintPanel) const SizedBox(height: 8),
                     _GuessCoordPill(guessed: guessed),
+                  ],
+                  if (submitted &&
+                      vsPlayer &&
+                      (aiHintReasoning?.trim().isNotEmpty ?? false)) ...<Widget>[
+                    const SizedBox(height: 8),
+                    _EntertainmentAiHintStrip(
+                      reasoning: aiHintReasoning,
+                      halvesScore: aiHintHalvesScore,
+                      aiSuggestedGuess: false,
+                      confidence: aiHintConfidence,
+                      hintOnlySheet: false,
+                      aiSuggestionDistanceKm: entertainmentAiHintDistanceKm(
+                        place,
+                        entertainmentAiHintLocation,
+                      ),
+                    ),
                   ],
                   if (submitted && vsAi) ...<Widget>[
                     const SizedBox(height: 8),
@@ -1585,71 +1613,252 @@ class _MapOverlay extends StatelessWidget {
   }
 }
 
-/// 浮動頂部 header：半透明黑底 + 關閉鈕 + 標題。
+const Color _kAiOrange = Color(0xFFFF7A1A);
+
+/// 娛樂模式 AI 建議點與正確答案的距離（結算後回顧用）。
+double? entertainmentAiHintDistanceKm(Place place, LatLng? hint) {
+  if (hint == null) return null;
+  return GuessResult.fromGuess(correctPlace: place, guessed: hint).distanceKm;
+}
+
+/// 單人 AI 對戰／多人娛樂模式共用：底部面板顯示完整 AI 推理。
+void showAiReasoningDetailSheet(
+  BuildContext context, {
+  required String reasoning,
+  double? confidence,
+  String? distanceText,
+  String? scoreText,
+  String title = 'AI 怎麼判斷',
+}) {
+  final String confText =
+      confidence == null ? '—' : '${(confidence * 100).round()}%';
+  final bool showDistance = distanceText != null;
+  final bool showScore = scoreText != null;
+
+  showModalBottomSheet<void>(
+    context: context,
+    backgroundColor: const Color(0xFF101014),
+    isScrollControlled: true,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    ),
+    builder: (BuildContext ctx) {
+      final double bottomSafe = MediaQuery.of(ctx).padding.bottom;
+      return Padding(
+        padding: EdgeInsets.fromLTRB(20, 16, 20, 16 + bottomSafe),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: <Widget>[
+                const Icon(Icons.smart_toy_outlined, color: _kAiOrange, size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: <Widget>[
+                if (showDistance) ...<Widget>[
+                  _DetailChip(label: '距離', value: distanceText),
+                  const SizedBox(width: 10),
+                ],
+                if (showScore) ...<Widget>[
+                  _DetailChip(label: '分數', value: scoreText),
+                  const SizedBox(width: 10),
+                ],
+                _DetailChip(label: '信心', value: confText),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Text(
+              reasoning.trim(),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                height: 1.6,
+              ),
+            ),
+            const SizedBox(height: 18),
+            SizedBox(
+              height: 46,
+              child: FilledButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                style: FilledButton.styleFrom(
+                  backgroundColor: _kAiOrange,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: const Text(
+                  '了解',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    },
+  );
+}
+
+/// 多人娛樂模式 AI 建議條（猜題中／結算後皆可點開完整推理）。
 class _EntertainmentAiHintStrip extends StatelessWidget {
   const _EntertainmentAiHintStrip({
     required this.reasoning,
     required this.halvesScore,
     required this.aiSuggestedGuess,
+    required this.confidence,
+    required this.hintOnlySheet,
+    this.aiSuggestionDistanceKm,
   });
 
   final String? reasoning;
   final bool halvesScore;
   final bool aiSuggestedGuess;
+  final double? confidence;
+  /// 猜題中：不顯示距離／分數，避免爆雷。
+  final bool hintOnlySheet;
+  final double? aiSuggestionDistanceKm;
 
-  static const Color _aiColor = Color(0xFFFF7A1A);
+  bool get _hasReasoning => reasoning != null && reasoning!.trim().isNotEmpty;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.78),
+    final bool tappable = _hasReasoning;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _aiColor.withValues(alpha: 0.7)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          Row(
+        onTap: tappable ? () => _openDetail(context) : null,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.78),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: _kAiOrange.withValues(alpha: 0.7)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              const Icon(Icons.smart_toy_outlined, size: 16, color: _aiColor),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  aiSuggestedGuess
-                      ? 'AI 建議（橘標）· 拖移後改為你的猜測'
-                      : (halvesScore
-                          ? '已用 AI 道具 · 送出後本回合分數折半'
-                          : 'AI 建議'),
-                  style: const TextStyle(
-                    color: _aiColor,
-                    fontWeight: FontWeight.w900,
-                    fontSize: 13,
+              Row(
+                children: <Widget>[
+                  const Icon(
+                    Icons.smart_toy_outlined,
+                    size: 16,
+                    color: _kAiOrange,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      aiSuggestedGuess
+                          ? 'AI 建議（橘標）· 拖移後改為你的猜測'
+                          : (halvesScore
+                              ? '已用 AI 道具 · 送出後本回合分數折半'
+                              : 'AI 建議'),
+                      style: const TextStyle(
+                        color: _kAiOrange,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              if (_hasReasoning) ...<Widget>[
+                const SizedBox(height: 6),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Expanded(
+                      child: Text(
+                        '「${reasoning!.trim()}」',
+                        maxLines: hintOnlySheet ? 4 : 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: hintOnlySheet ? Colors.white : Colors.white60,
+                          fontSize: hintOnlySheet ? 13 : 11,
+                          fontStyle:
+                              hintOnlySheet ? FontStyle.normal : FontStyle.italic,
+                          height: 1.35,
+                          fontWeight: hintOnlySheet
+                              ? FontWeight.w600
+                              : FontWeight.w400,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    const Padding(
+                      padding: EdgeInsets.only(top: 1),
+                      child: Icon(
+                        Icons.unfold_more,
+                        size: 14,
+                        color: _kAiOrange,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                const Text(
+                  '點我看 AI 怎麼判斷',
+                  style: TextStyle(
+                    color: _kAiOrange,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.5,
                   ),
                 ),
-              ),
+              ],
             ],
           ),
-          if (reasoning != null && reasoning!.isNotEmpty) ...<Widget>[
-            const SizedBox(height: 6),
-            Text(
-              reasoning!,
-              maxLines: 4,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 13,
-                height: 1.35,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ],
+        ),
       ),
     );
   }
+
+  void _openDetail(BuildContext context) {
+    String? distanceText;
+    if (!hintOnlySheet && aiSuggestionDistanceKm != null) {
+      distanceText = aiSuggestionDistanceKm! < 1
+          ? '<1 公里'
+          : '${aiSuggestionDistanceKm!.toStringAsFixed(1)} 公里';
+    }
+    showAiReasoningDetailSheet(
+      context,
+      reasoning: reasoning!,
+      confidence: confidence,
+      distanceText: distanceText,
+      title: hintOnlySheet ? 'AI 建議說明' : 'AI 怎麼判斷',
+    );
+  }
 }
+
+/// 浮動頂部 header：半透明黑底 + 關閉鈕 + 標題。
 
 class _MapOverlayHeader extends StatelessWidget {
   final bool submitted;
@@ -2051,99 +2260,17 @@ class _AiVersusStrip extends StatelessWidget {
 
   void _openDetail(BuildContext context) {
     final GuessResult? ai = aiResult;
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: const Color(0xFF101014),
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (BuildContext ctx) {
-        final double bottomSafe = MediaQuery.of(ctx).padding.bottom;
-        final String distanceText = ai?.distanceKm == null
-            ? '—'
-            : (ai!.distanceKm! < 1
-                ? '<1 公里'
-                : '${ai.distanceKm!.toStringAsFixed(1)} 公里');
-        final String confText = confidence == null
-            ? '—'
-            : '${(confidence! * 100).round()}%';
-        return Padding(
-          padding: EdgeInsets.fromLTRB(20, 16, 20, 16 + bottomSafe),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.white24,
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              const Row(
-                children: <Widget>[
-                  Icon(Icons.smart_toy_outlined, color: _aiColor, size: 20),
-                  SizedBox(width: 8),
-                  Text(
-                    'AI 怎麼判斷',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 17,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 1,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              Row(
-                children: <Widget>[
-                  _DetailChip(label: '距離', value: distanceText),
-                  const SizedBox(width: 10),
-                  _DetailChip(label: '分數', value: '${ai?.score ?? 0}'),
-                  const SizedBox(width: 10),
-                  _DetailChip(label: '信心', value: confText),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Text(
-                reasoning!.trim(),
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  height: 1.6,
-                ),
-              ),
-              const SizedBox(height: 18),
-              SizedBox(
-                height: 46,
-                child: FilledButton(
-                  onPressed: () => Navigator.of(ctx).pop(),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: _aiColor,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child: const Text(
-                    '了解',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 1,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
+    final String? distanceText = ai?.distanceKm == null
+        ? null
+        : (ai!.distanceKm! < 1
+            ? '<1 公里'
+            : '${ai.distanceKm!.toStringAsFixed(1)} 公里');
+    showAiReasoningDetailSheet(
+      context,
+      reasoning: reasoning!,
+      confidence: confidence,
+      distanceText: distanceText,
+      scoreText: ai != null ? '${ai.score}' : null,
     );
   }
 }

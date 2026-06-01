@@ -48,12 +48,19 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
         email: _emailCtrl.text.trim(),
       );
       if (!mounted) return;
+      if (!result.ok || result.resetToken == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result.message),
+            duration: const Duration(seconds: 5),
+          ),
+        );
+        return;
+      }
       setState(() {
         _issuedResetToken = result.resetToken;
         _step = 1;
-        if (result.resetToken != null) {
-          _codeCtrl.text = result.resetToken!;
-        }
+        _codeCtrl.text = result.resetToken!;
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

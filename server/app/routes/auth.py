@@ -11,6 +11,15 @@ from app.config import (
     PASSWORD_RESET_EXPOSE_TOKEN,
 )
 from app.database import as_utc_aware, utc_now, users_collection
+from app.email_accounts import (
+    find_email_password_user,
+    find_oauth_user_by_email,
+    normalize_email,
+    oauth_login_hint_detail,
+    provider_label,
+    raise_login_not_found,
+    require_email_password_user,
+)
 from app.display_name import (
     allocate_unique_display_name,
     assert_display_name_available,
@@ -143,12 +152,18 @@ async def get_current_user(
     status_code=status.HTTP_201_CREATED,
 )
 async def register(body: RegisterRequest) -> AuthResponse:
-    email = body.email.strip().lower()
+    email = normalize_email(body.email)
     col = users_collection()
-    if col.find_one({"email": email, "provider": "email"}):
+    if find_email_password_user(col, email):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Email already registered",
+            detail="此 Email 已註冊，請直接登入",
+        )
+    oauth = find_oauth_user_by_email(col, email)
+    if oauth is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=oauth_login_hint_detail(oauth),
         )
     now = utc_now()
     display_name = assert_display_name_available(col, body.display_name.strip())
@@ -170,14 +185,18 @@ async def register(body: RegisterRequest) -> AuthResponse:
 
 @router.post("/login", response_model=AuthResponse)
 async def login(body: LoginRequest) -> AuthResponse:
-    email = body.email.strip().lower()
-    doc = users_collection().find_one({"email": email, "provider": "email"})
+    email = normalize_email(body.email)
+    col = users_collection()
+    doc = find_email_password_user(col, email)
     if doc is None:
+        raise_login_not_found(col, email)
+    password_hash = doc.get("passwordHash") or ""
+    if not password_hash:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="此 Email 尚未註冊，請先按「還沒有帳號？註冊」",
+            detail="此帳號尚未設定密碼，請使用「忘記密碼」設定新密碼",
         )
-    if not verify_password(body.password, doc.get("passwordHash", "")):
+    if not verify_password(body.password, password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="密碼錯誤，請再試一次",
@@ -422,18 +441,31 @@ async def update_profile(
 @router.post("/forgot-password")
 async def forgot_password(body: ForgotPasswordRequest) -> dict:
     """建立重設碼。教育版可在回應中回傳 resetToken；正式環境應改寄 Email。"""
-    email = body.email.strip().lower()
-    doc = users_collection().find_one({"email": email, "provider": "email"})
+    email = normalize_email(body.email)
+    col = users_collection()
+    doc = find_email_password_user(col, email)
     if doc is None:
+        oauth = find_oauth_user_by_email(col, email)
+        if oauth is not None:
+            label = provider_label(str(oauth.get("provider") or ""))
+            return {
+                "ok": False,
+                "message": (
+                    f"此 Email 為 {label} 帳號，沒有 Email 密碼可重設，"
+                    f"請改用「使用 {label} 登入」。"
+                ),
+                "hintProvider": oauth.get("provider"),
+            }
         # 不透露 Email 是否存在（仍回相同訊息）
         return {
             "ok": True,
-            "message": "若此 Email 已註冊，請使用重設碼完成重設。",
+            "message": "若此 Email 已註冊 Email 帳號，請使用重設碼完成重設。",
+            "resetToken": None,
         }
 
     plain_token = generate_reset_token()
     expires = utc_now() + timedelta(minutes=PASSWORD_RESET_EXPIRE_MINUTES)
-    users_collection().update_one(
+    col.update_one(
         {"_id": doc["_id"]},
         {
             "$set": {
@@ -456,13 +488,17 @@ async def forgot_password(body: ForgotPasswordRequest) -> dict:
 
 @router.post("/reset-password")
 async def reset_password(body: ResetPasswordRequest) -> dict:
-    email = body.email.strip().lower()
-    doc = users_collection().find_one({"email": email, "provider": "email"})
-    if doc is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="重設碼無效或已過期",
-        )
+    email = normalize_email(body.email)
+    col = users_collection()
+    try:
+        doc = require_email_password_user(col, email)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_400_BAD_REQUEST:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc.detail),
+            ) from exc
+        raise
 
     expires = doc.get("resetTokenExpires")
     token_hash = doc.get("resetTokenHash")
@@ -487,11 +523,12 @@ async def reset_password(body: ResetPasswordRequest) -> dict:
             detail="重設碼錯誤",
         )
 
-    users_collection().update_one(
+    col.update_one(
         {"_id": doc["_id"]},
         {
             "$set": {
                 "passwordHash": hash_password(body.new_password),
+                "provider": "email",
                 "updatedAt": utc_now(),
             },
             "$unset": {
@@ -500,7 +537,7 @@ async def reset_password(body: ResetPasswordRequest) -> dict:
             },
         },
     )
-    return {"ok": True, "message": "密碼已重設，請用新密碼登入"}
+    return {"ok": True, "message": "密碼已重設，請用新密碼以 Email 登入"}
 
 
 @router.post("/change-password")

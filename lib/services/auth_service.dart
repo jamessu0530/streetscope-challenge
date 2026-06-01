@@ -1,5 +1,5 @@
 // =============================================================================
-// AuthService — Email / Google / Facebook / GitHub 登入接 FastAPI + MongoDB。
+// AuthService — Email、Google、Facebook、GitHub 四種登入接 FastAPI + MongoDB。
 // =============================================================================
 
 import 'dart:async';
@@ -29,11 +29,16 @@ class ForgotPasswordResult {
     required this.message,
     this.resetToken,
     this.expiresInMinutes,
+    this.ok = true,
+    this.hintProvider,
   });
 
   final String message;
   final String? resetToken;
   final int? expiresInMinutes;
+  /// 後端是否成功建立重設碼（false 常見於此 Email 為 Google 等社群帳號）。
+  final bool ok;
+  final String? hintProvider;
 }
 
 class AuthService {
@@ -142,7 +147,7 @@ class AuthService {
     return _authPost(
       '/auth/login',
       <String, dynamic>{
-        'email': email.trim(),
+        'email': email.trim().toLowerCase(),
         'password': password,
       },
     );
@@ -290,7 +295,9 @@ class AuthService {
         .post(
           _uri('/auth/forgot-password'),
           headers: const <String, String>{'Content-Type': 'application/json'},
-          body: jsonEncode(<String, String>{'email': email.trim()}),
+          body: jsonEncode(<String, String>{
+            'email': email.trim().toLowerCase(),
+          }),
         )
         .timeout(const Duration(seconds: 15));
 
@@ -300,6 +307,8 @@ class AuthService {
         message: (data['message'] as String?) ?? '已申請重設碼',
         resetToken: data['resetToken'] as String?,
         expiresInMinutes: data['expiresInMinutes'] as int?,
+        ok: data['ok'] as bool? ?? true,
+        hintProvider: data['hintProvider'] as String?,
       );
     }
     throw AuthException(_errorMessage(response));
@@ -319,7 +328,7 @@ class AuthService {
           _uri('/auth/reset-password'),
           headers: const <String, String>{'Content-Type': 'application/json'},
           body: jsonEncode(<String, String>{
-            'email': email.trim(),
+            'email': email.trim().toLowerCase(),
             'resetToken': resetToken.trim().toUpperCase(),
             'newPassword': newPassword,
           }),
