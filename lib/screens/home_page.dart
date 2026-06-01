@@ -47,7 +47,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    AudioService.instance.startHomeBgm();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      AudioService.instance.startHomeBgm();
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       await ensureNicknameSetup(context);

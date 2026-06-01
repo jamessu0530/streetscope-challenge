@@ -10,7 +10,13 @@ from app.config import (
     PASSWORD_RESET_EXPIRE_MINUTES,
     PASSWORD_RESET_EXPOSE_TOKEN,
 )
-from app.database import as_utc_aware, utc_now, users_collection
+from app.database import (
+    as_utc_aware,
+    leaderboard_collection,
+    play_history_collection,
+    utc_now,
+    users_collection,
+)
 from app.email_accounts import (
     find_email_password_user,
     find_oauth_user_by_email,
@@ -435,6 +441,17 @@ async def update_profile(
             detail="User not found",
         )
     await hub.update_display_name(str(doc["_id"]), display_name)
+
+    user_oid = user["_id"]
+    leaderboard_collection().update_many(
+        {"userId": user_oid},
+        {"$set": {"displayName": display_name}},
+    )
+    play_history_collection().update_many(
+        {"userId": user_oid},
+        {"$set": {"displayName": display_name}},
+    )
+
     return _doc_to_public(doc)
 
 

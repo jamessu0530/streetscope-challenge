@@ -9,9 +9,9 @@ import '../models/auth_user.dart';
 import '../services/audio_service.dart';
 import '../services/auth_service.dart';
 import '../utils/nickname_utils.dart';
+import '../utils/post_login_navigation.dart';
 import '../widgets/matchday_ui.dart';
 import 'forgot_password_page.dart';
-import 'nickname_page.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -54,29 +54,13 @@ class _LoginPageState extends State<LoginPage> {
     String Function(AuthUser user)? successMessage,
   }) async {
     if (!mounted) return;
-    if (user.needsNicknameSetup) {
-      final bool ready = await ensureNicknameSetup(context);
-      if (!mounted) return;
-      if (!ready) {
-        await AuthService.instance.signOut();
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('請完成遊戲暱稱設定後再登入')),
-        );
-        return;
-      }
-    }
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          successMessage?.call(AuthService.instance.currentUser.value ?? user) ??
-              '歡迎，${(AuthService.instance.currentUser.value ?? user).displayName}',
-        ),
-        duration: const Duration(seconds: 2),
-      ),
+    final String welcome =
+        successMessage?.call(AuthService.instance.currentUser.value ?? user) ??
+            '歡迎，${(AuthService.instance.currentUser.value ?? user).displayName}';
+    await completeLoginAndReturnHome(
+      context,
+      welcomeMessage: welcome,
     );
-    Navigator.of(context).pop(true);
   }
 
   Future<void> _runSignIn(

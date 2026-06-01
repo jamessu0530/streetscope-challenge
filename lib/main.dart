@@ -23,6 +23,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
+import 'app_navigator.dart';
 import 'screens/game_page.dart';
 import 'screens/home_page.dart';
 import 'services/audio_service.dart';
@@ -37,12 +38,11 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load(fileName: '.env', isOptional: true);
   await AuthService.instance.init();
+  await AudioService.instance.ensureInitialized();
   await LeaderboardService.instance.purgeLocalStorage();
   await MemeCollectionService.instance.purgeLocalStorage();
   runApp(const GeoGuesserApp());
 }
-
-final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 
 class GeoGuesserApp extends StatefulWidget {
   const GeoGuesserApp({super.key});

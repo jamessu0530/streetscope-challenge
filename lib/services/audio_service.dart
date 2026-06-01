@@ -29,6 +29,11 @@ class AudioService {
   AudioService._();
   static final AudioService instance = AudioService._();
 
+  static bool _audioContextReady = false;
+  /// iOS 若 objective_c / path_provider FFI 失敗，關閉音訊避免重複觸發原生崩潰。
+  static bool _audioUnavailable = false;
+  Future<void>? _initFuture;
+
   static const String _homeBgmAsset = 'audio/home_bgm.mp3';
   static const String _calmBgmAsset = 'audio/calm_bgm.mp3';
   static const String _gameBgmAsset = 'audio/lofi_bgm.mp3';
@@ -45,6 +50,8 @@ class AudioService {
   /// 離開遊戲、送答案等「收尾」用稍短 fade out。
   static const Duration _bgmFadeOutDuration = Duration(milliseconds: 800);
   static const int _bgmFadeSteps = 15;
+  static const Duration _playTimeout = Duration(seconds: 8);
+  static const Duration _iosPlayCooldown = Duration(milliseconds: 50);
 
   final AudioPlayer _homeBgmPlayer = AudioPlayer(playerId: 'home-bgm')
     ..setReleaseMode(ReleaseMode.loop);
@@ -77,6 +84,68 @@ class AudioService {
 
   bool _isBgmOpCurrent(int gen) => gen == _bgmOpGen;
 
+  static bool get isAudioUnavailable => _audioUnavailable;
+
+  void _markAudioUnavailable(Object error) {
+    if (_audioUnavailable) return;
+    final String msg = error.toString();
+    if (!msg.contains('objective_c') && !msg.contains('DOBJC_initializeApi')) {
+      return;
+    }
+    _audioUnavailable = true;
+    if (kDebugMode) {
+      debugPrint('Audio disabled (iOS native FFI): $error');
+    }
+  }
+
+  /// App 啟動時呼叫一次（iOS playback session；勿加 defaultToSpeaker，僅 playAndRecord 可用）。
+  Future<void> ensureInitialized() async {
+    if (_audioUnavailable || _audioContextReady) return;
+    _initFuture ??= _configureAudioContext();
+    await _initFuture;
+  }
+
+  Future<void> _configureAudioContext() async {
+    try {
+      await AudioPlayer.global.setAudioContext(
+        AudioContext(
+          iOS: AudioContextIOS(
+            category: AVAudioSessionCategory.playback,
+          ),
+          android: const AudioContextAndroid(
+            contentType: AndroidContentType.music,
+            usageType: AndroidUsageType.game,
+            audioFocus: AndroidAudioFocus.gain,
+          ),
+        ),
+      );
+    } catch (e) {
+      if (kDebugMode) debugPrint('AudioContext init error: $e');
+    } finally {
+      _audioContextReady = true;
+    }
+  }
+
+  /// iOS：先 stop、短暫延遲，setSource + resume（比單次 play 較不易 timeout）。
+  Future<bool> _playAsset(AudioPlayer player, String asset) async {
+    if (_audioUnavailable) return false;
+    try {
+      await player.stop();
+      await Future<void>.delayed(_iosPlayCooldown);
+      final Source source = AssetSource(asset);
+      await player.setSource(source).timeout(_playTimeout);
+      await player.resume().timeout(_playTimeout);
+      return true;
+    } on TimeoutException {
+      if (kDebugMode) debugPrint('Audio play timeout: $asset');
+      return false;
+    } catch (e) {
+      _markAudioUnavailable(e);
+      if (kDebugMode) debugPrint('Audio play error ($asset): $e');
+      return false;
+    }
+  }
+
   Duration _stepDelay(Duration total) => Duration(
         microseconds: total.inMicroseconds ~/ _bgmFadeSteps,
       );
@@ -105,8 +174,10 @@ class AudioService {
   ) async {
     if (!_isBgmOpCurrent(gen)) return;
     try {
+      await ensureInitialized();
       await player.setVolume(0);
-      await player.play(AssetSource(asset));
+      final bool started = await _playAsset(player, asset);
+      if (!started || !_isBgmOpCurrent(gen)) return;
       await _fadePlayerVolume(gen, player, 0, peakVolume, _bgmCrossfadeDuration);
       if (!_isBgmOpCurrent(gen)) return;
       await player.setVolume(peakVolume);
@@ -146,8 +217,10 @@ class AudioService {
   }) async {
     if (!_isBgmOpCurrent(gen)) return;
     try {
+      await ensureInitialized();
       await inPlayer.setVolume(0);
-      await inPlayer.play(AssetSource(inAsset));
+      final bool started = await _playAsset(inPlayer, inAsset);
+      if (!started) return;
       markInStarted();
 
       final Duration step = _stepDelay(_bgmCrossfadeDuration);
@@ -188,6 +261,7 @@ class AudioService {
   // ---- Home BGM（首頁 / 選模式頁） -----------------------------------------
   Future<void> startHomeBgm() async {
     if (_homePlaying) return;
+    await ensureInitialized();
     final int gen = _nextBgmOpGen();
 
     if (_calmPlaying || _gamePlaying) {
@@ -442,32 +516,20 @@ class AudioService {
 
   // ---- SFX ------------------------------------------------------------------
   Future<void> playTick() async {
-    try {
-      await _sfxPlayer.stop();
-      await _sfxPlayer.setVolume(1.0);
-      await _sfxPlayer.play(AssetSource(_tickAsset));
-    } catch (e) {
-      if (kDebugMode) debugPrint('Tick play error: $e');
-    }
+    await ensureInitialized();
+    await _sfxPlayer.setVolume(1.0);
+    await _playAsset(_sfxPlayer, _tickAsset);
   }
 
   Future<void> playClick() async {
-    try {
-      await _clickPlayer.stop();
-      await _clickPlayer.setVolume(0.8);
-      await _clickPlayer.play(AssetSource(_clickAsset));
-    } catch (e) {
-      if (kDebugMode) debugPrint('Click play error: $e');
-    }
+    await ensureInitialized();
+    await _clickPlayer.setVolume(0.8);
+    await _playAsset(_clickPlayer, _clickAsset);
   }
 
   Future<void> playChallengeFanfare() async {
-    try {
-      await _challengePlayer.stop();
-      await _challengePlayer.setVolume(0.7);
-      await _challengePlayer.play(AssetSource(_challengeAsset));
-    } catch (e) {
-      if (kDebugMode) debugPrint('Challenge fanfare play error: $e');
-    }
+    await ensureInitialized();
+    await _challengePlayer.setVolume(0.7);
+    await _playAsset(_challengePlayer, _challengeAsset);
   }
 }

@@ -4,6 +4,7 @@ import '../models/auth_user.dart';
 import '../services/audio_service.dart';
 import '../services/auth_service.dart';
 import '../utils/nickname_utils.dart';
+import '../utils/post_login_navigation.dart';
 import '../widgets/matchday_ui.dart';
 
 /// 若尚未完成暱稱設定，導向設定頁。回傳 true 代表可繼續（已設定或設定完成）。
@@ -12,16 +13,14 @@ Future<bool> ensureNicknameSetup(BuildContext context) async {
   if (user == null || !user.needsNicknameSetup) {
     return true;
   }
-  final bool? ok = await Navigator.of(context).push<bool>(
-    MaterialPageRoute<bool>(
+  await Navigator.of(context).push<void>(
+    MaterialPageRoute<void>(
       builder: (BuildContext _) => NicknameSetupPage(
         initialName: user.nicknameSuggestion,
       ),
     ),
   );
-  if (ok != true || !context.mounted) {
-    return false;
-  }
+  if (!context.mounted) return false;
   return !(AuthService.instance.currentUser.value?.needsNicknameSetup ?? true);
 }
 
@@ -54,7 +53,7 @@ class _NicknameSetupPageState extends State<NicknameSetupPage> {
     try {
       await AuthService.instance.updateDisplayName(_nameCtrl.text.trim());
       if (!mounted) return;
-      Navigator.of(context).pop(true);
+      returnToAppHome(context, snackMessage: '暱稱已設定');
     } on AuthException catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -175,10 +174,7 @@ class _EditNicknamePageState extends State<EditNicknamePage> {
     try {
       await AuthService.instance.updateDisplayName(_nameCtrl.text.trim());
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('暱稱已更新')),
-      );
-      Navigator.of(context).pop();
+      returnToAppHome(context, snackMessage: '暱稱已更新');
     } on AuthException catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

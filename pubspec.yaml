@@ -27,9 +27,9 @@ dependencies:
   flutter_web_auth_2: ^4.1.0
   flutter_svg: ^2.0.10+1
 
+# path_provider_foundation 2.6+ 使用 objective_c FFI，真機常無法載入 framework 導致崩潰。
 dependency_overrides:
-  # 真機安裝需有效簽章；舊版 native asset framework 會觸發 0xe8008014
-  objective_c: ^9.4.1
+  path_provider_foundation: 2.5.1
 
 dev_dependencies:
   flutter_test:
