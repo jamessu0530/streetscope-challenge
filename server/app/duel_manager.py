@@ -476,6 +476,8 @@ class DuelManager:
                         "displayName": room.display_name(pid),
                         "score": g["score"],
                         "distanceKm": g.get("distanceKm"),
+                        "guessedLat": g.get("guessedLat"),
+                        "guessedLng": g.get("guessedLng"),
                     }
                 )
 
@@ -560,6 +562,8 @@ class DuelManager:
             "myDistanceKm": my_guess.get("distanceKm") if my_guess else None,
             "opponentScore": opp_guess.get("score") if opp_guess else None,
             "opponentDistanceKm": opp_guess.get("distanceKm") if opp_guess else None,
+            "opponentGuessedLat": opp_guess.get("guessedLat") if opp_guess else None,
+            "opponentGuessedLng": opp_guess.get("guessedLng") if opp_guess else None,
         }
 
     async def _send_state_sync(self, user_id: str, room: DuelRoom) -> None:

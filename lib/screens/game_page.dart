@@ -99,6 +99,9 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   bool _duelCanAdvance = false;
   int? _duelOpponentScore;
   double? _duelOpponentDistanceKm;
+  LatLng? _duelOpponentGuess;
+  /// 最後一回合結算完成後暫存，等玩家按「查看對戰結果」再進計分頁。
+  DuelRoundComplete? _pendingDuelMatchEnd;
   bool _duelCancelledHandled = false;
   bool _waitingForOpponentReconnect = false;
 
@@ -188,11 +191,18 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         if (opponent != null) {
           _duelOpponentScore = opponent.score;
           _duelOpponentDistanceKm = opponent.distanceKm;
+          _duelOpponentGuess = opponent.guessedLocation;
         }
       });
+      if (_submitted && _mapController != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          _fitMapToBoth();
+        });
+      }
 
       if (complete.matchEnd) {
-        _finishDuelMatch(complete, me.id);
+        _pendingDuelMatchEnd = complete;
       }
       return;
     }
@@ -247,6 +257,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
       _duelOpponentSubmitted = resume.duelOpponentSubmitted;
       _duelOpponentScore = resume.duelOpponentScore;
       _duelOpponentDistanceKm = resume.duelOpponentDistanceKm;
+      _duelOpponentGuess = resume.duelOpponentGuess;
       _waitingForOpponentReconnect = resume.waitingForOpponentReconnect;
       if (resume.submitted) {
         _mapOverlayOpen = true;
@@ -623,6 +634,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
       _duelCanAdvance = false;
       _duelOpponentScore = null;
       _duelOpponentDistanceKm = null;
+      _duelOpponentGuess = null;
       final String? roomId = widget.settings.duelRoomId?.trim();
       if (roomId != null && roomId.isNotEmpty) {
         RealtimeService.instance.submitDuelRound(
@@ -747,13 +759,18 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     if (c == null) return;
     final LatLng correct = _currentPlace.latLng;
     final LatLng? guessed = _guessedLocation;
+    final LatLng? opponentGuess =
+        _vsPlayer && _submitted ? _duelOpponentGuess : null;
 
     try {
-      if (guessed == null) {
+      final List<LatLng> points = <LatLng>[correct];
+      if (guessed != null) points.add(guessed);
+      if (opponentGuess != null) points.add(opponentGuess);
+      if (points.length == 1) {
         await c.animateCamera(CameraUpdate.newLatLngZoom(correct, 5));
         return;
       }
-      final LatLngBounds bounds = boundsForTwoPoints(guessed, correct);
+      final LatLngBounds bounds = boundsForPoints(points);
       final double latSpan =
           (bounds.northeast.latitude - bounds.southwest.latitude).abs();
       final double lngSpan =
@@ -796,6 +813,15 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
 
     if (_currentRound >= _places!.length - 1) {
       if (_vsPlayer) {
+        if (_pendingDuelMatchEnd != null && _duelCanAdvance) {
+          final AuthUser? me = AuthService.instance.currentUser.value;
+          if (me != null) {
+            final DuelRoundComplete complete = _pendingDuelMatchEnd!;
+            _pendingDuelMatchEnd = null;
+            _finishDuelMatch(complete, me.id);
+          }
+          return;
+        }
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('等待對戰結算…')),
         );
@@ -846,6 +872,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
       _duelCanAdvance = false;
       _duelOpponentScore = null;
       _duelOpponentDistanceKm = null;
+      _duelOpponentGuess = null;
       _memeOverlayOpen = false;
       _memeOutcome = null;
       _memeLoading = false;
@@ -918,6 +945,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
                 duelOpponentSubmitted: _duelOpponentSubmitted,
                 duelOpponentScore: _duelOpponentScore,
                 duelOpponentDistanceKm: _duelOpponentDistanceKm,
+                duelOpponentGuess: _duelOpponentGuess,
                 duelCanAdvance: _duelCanAdvance,
                 aiThinking: _aiIsThinking(_currentRound),
                 aiResult: _aiResultForRound(_currentRound),
@@ -1081,7 +1109,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         if (_entertainmentDuel && !_submitted)
           Positioned(
             left: 16,
-            right: 16,
+            right: 16 + _kMapZoomColumnReserve,
             bottom: 88 + bottomSafe,
             child: SafeArea(
               top: false,
@@ -1402,6 +1430,7 @@ class _MapOverlay extends StatelessWidget {
   final bool duelOpponentSubmitted;
   final int? duelOpponentScore;
   final double? duelOpponentDistanceKm;
+  final LatLng? duelOpponentGuess;
   final bool duelCanAdvance;
   final bool aiThinking;
   final GuessResult? aiResult;
@@ -1431,6 +1460,7 @@ class _MapOverlay extends StatelessWidget {
     this.duelOpponentSubmitted = false,
     this.duelOpponentScore,
     this.duelOpponentDistanceKm,
+    this.duelOpponentGuess,
     this.duelCanAdvance = false,
     required this.aiThinking,
     required this.aiResult,
@@ -1457,16 +1487,27 @@ class _MapOverlay extends StatelessWidget {
     final double topSafe = MediaQuery.of(context).padding.top;
     final double bottomSafe = MediaQuery.of(context).padding.bottom;
 
-    // 底部操作條高度估計（給地圖的縮放按鈕 bottomInset 用）
-    final double bottomBarHeight = submitted
+    // 底部操作條高度估計（給地圖 +/- 的 bottomInset 用）
+    double bottomBarHeight = submitted
         ? (vsAi
             ? 210
             : vsPlayer
-                ? 200
+                ? 220
                 : 120)
-        : (showAiHintPanel && (aiHintReasoning?.isNotEmpty ?? false)
-            ? 168
-            : 110);
+        : showAiHintPanel
+            ? ((aiHintReasoning?.trim().isNotEmpty ?? false) ? 168 : 132)
+            : 110;
+    if (submitted &&
+        vsPlayer &&
+        (aiHintReasoning?.trim().isNotEmpty ?? false)) {
+      bottomBarHeight += 72;
+    }
+
+    // +/- 整組（約 88px）須在底部面板「上方」，勿用縮窄面板寬度。
+    const double panelBottomPad = 12;
+    const double zoomGapAbovePanel = 16;
+    final double mapZoomBottomInset =
+        bottomSafe + panelBottomPad + bottomBarHeight + zoomGapAbovePanel;
 
     return Positioned.fill(
       child: Material(
@@ -1483,9 +1524,13 @@ class _MapOverlay extends StatelessWidget {
                 guessedLocation: guessed,
                 correctLocation: submitted ? place.latLng : null,
                 aiLocation: submitted ? aiResult?.guessed : null,
+                opponentLocation:
+                    submitted && vsPlayer ? duelOpponentGuess : null,
+                opponentMarkerTitle:
+                    submitted && vsPlayer ? '$opponentName 的猜測' : null,
                 aiSuggestedGuess: aiSuggestedGuess,
                 cornerRadius: 0,
-                bottomInset: bottomBarHeight + bottomSafe + 8,
+                bottomInset: mapZoomBottomInset,
               ),
             ),
 
@@ -1503,11 +1548,11 @@ class _MapOverlay extends StatelessWidget {
               ),
             ),
 
-            // ---- 底部：結算 strip / 提示 + 主按鈕
+            // ---- 底部：結算 strip / 提示 + 主按鈕（全寬；+/- 靠 bottomInset 上移）
             Positioned(
               left: 12,
               right: 12,
-              bottom: bottomSafe + 12,
+              bottom: bottomSafe + panelBottomPad,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: <Widget>[
@@ -1614,6 +1659,9 @@ class _MapOverlay extends StatelessWidget {
 }
 
 const Color _kAiOrange = Color(0xFFFF7A1A);
+
+/// 地圖／街景右下角 +/- 按鈕寬度 + 邊距，底部橫條需避開以免擋到縮放。
+const double _kMapZoomColumnReserve = 58;
 
 /// 娛樂模式 AI 建議點與正確答案的距離（結算後回顧用）。
 double? entertainmentAiHintDistanceKm(Place place, LatLng? hint) {
@@ -2044,6 +2092,15 @@ class _PlayerVersusStrip extends StatelessWidget {
             style: const TextStyle(
               color: Colors.white70,
               fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            '地圖紫標為對手猜測 · 藍標為你 · 綠標為正解',
+            style: TextStyle(
+              color: Colors.white38,
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ],

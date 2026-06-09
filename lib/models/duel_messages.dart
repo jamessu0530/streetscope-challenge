@@ -1,3 +1,5 @@
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+
 import 'game_settings.dart';
 import 'online_player.dart';
 import 'place.dart';
@@ -36,15 +38,26 @@ class DuelRoundPlayerResult {
     required this.displayName,
     required this.score,
     this.distanceKm,
+    this.guessedLat,
+    this.guessedLng,
   });
 
   final String id;
   final String displayName;
   final int score;
   final double? distanceKm;
+  final double? guessedLat;
+  final double? guessedLng;
+
+  LatLng? get guessedLocation {
+    if (guessedLat == null || guessedLng == null) return null;
+    return LatLng(guessedLat!, guessedLng!);
+  }
 
   factory DuelRoundPlayerResult.fromJson(Map<String, dynamic> json) {
     final dynamic d = json['distanceKm'];
+    final dynamic lat = json['guessedLat'];
+    final dynamic lng = json['guessedLng'];
     return DuelRoundPlayerResult(
       id: (json['id'] as String?) ?? '',
       displayName: (json['displayName'] as String?) ?? 'Player',
@@ -52,6 +65,8 @@ class DuelRoundPlayerResult {
           (json['totalScore'] as num?)?.toInt() ??
           0,
       distanceKm: d == null ? null : (d as num).toDouble(),
+      guessedLat: lat == null ? null : (lat as num).toDouble(),
+      guessedLng: lng == null ? null : (lng as num).toDouble(),
     );
   }
 }
@@ -148,6 +163,8 @@ class DuelStateSync {
     this.myDistanceKm,
     this.opponentScore,
     this.opponentDistanceKm,
+    this.opponentGuessedLat,
+    this.opponentGuessedLng,
   });
 
   final String roomId;
@@ -164,6 +181,13 @@ class DuelStateSync {
   final double? myDistanceKm;
   final int? opponentScore;
   final double? opponentDistanceKm;
+  final double? opponentGuessedLat;
+  final double? opponentGuessedLng;
+
+  LatLng? get opponentGuessedLocation {
+    if (opponentGuessedLat == null || opponentGuessedLng == null) return null;
+    return LatLng(opponentGuessedLat!, opponentGuessedLng!);
+  }
 
   factory DuelStateSync.fromJson(Map<String, dynamic> json) {
     final OnlinePlayer opponent = OnlinePlayer.fromJson(
@@ -174,6 +198,8 @@ class DuelStateSync {
     );
     final dynamic myD = json['myDistanceKm'];
     final dynamic oppD = json['opponentDistanceKm'];
+    final dynamic oppLat = json['opponentGuessedLat'];
+    final dynamic oppLng = json['opponentGuessedLng'];
     return DuelStateSync(
       roomId: (json['roomId'] as String?) ?? '',
       settings: base.copyWith(
@@ -200,6 +226,8 @@ class DuelStateSync {
       myDistanceKm: myD == null ? null : (myD as num).toDouble(),
       opponentScore: (json['opponentScore'] as num?)?.toInt(),
       opponentDistanceKm: oppD == null ? null : (oppD as num).toDouble(),
+      opponentGuessedLat: oppLat == null ? null : (oppLat as num).toDouble(),
+      opponentGuessedLng: oppLng == null ? null : (oppLng as num).toDouble(),
     );
   }
 
@@ -211,6 +239,7 @@ class DuelStateSync {
       duelOpponentSubmitted: opponentSubmitted,
       duelOpponentScore: opponentScore,
       duelOpponentDistanceKm: opponentDistanceKm,
+      duelOpponentGuess: opponentGuessedLocation,
       waitingForOpponentReconnect: opponentDisconnected,
       myScore: myScore,
       myDistanceKm: myDistanceKm,
@@ -227,6 +256,7 @@ class DuelResumeState {
     required this.waitingForOpponentReconnect,
     this.duelOpponentScore,
     this.duelOpponentDistanceKm,
+    this.duelOpponentGuess,
     this.myScore,
     this.myDistanceKm,
   });
@@ -238,6 +268,7 @@ class DuelResumeState {
   final bool waitingForOpponentReconnect;
   final int? duelOpponentScore;
   final double? duelOpponentDistanceKm;
+  final LatLng? duelOpponentGuess;
   final int? myScore;
   final double? myDistanceKm;
 }

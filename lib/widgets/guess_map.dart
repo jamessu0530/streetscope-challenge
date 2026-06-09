@@ -20,6 +20,10 @@ class GuessMap extends StatefulWidget {
   /// AI 對手的猜測位置（送出後才會顯示）。
   final LatLng? aiLocation;
 
+  /// 真人對戰對手的猜測位置（結算後顯示）。
+  final LatLng? opponentLocation;
+  final String? opponentMarkerTitle;
+
   /// 娛樂模式：猜測點是否仍顯示 AI 建議的橘色樣式（拖移後改為藍色）。
   final bool aiSuggestedGuess;
 
@@ -37,6 +41,8 @@ class GuessMap extends StatefulWidget {
     this.guessedLocation,
     this.correctLocation,
     this.aiLocation,
+    this.opponentLocation,
+    this.opponentMarkerTitle,
     this.aiSuggestedGuess = false,
     this.onGuessDragEnd,
     this.cornerRadius = 12,
@@ -130,6 +136,33 @@ class _GuessMapState extends State<GuessMap> {
           ),
         );
       }
+      // 真人對手 → 正確位置（紫色虛線感用較淡實線）。
+      if (widget.opponentLocation != null) {
+        polylines.add(
+          Polyline(
+            polylineId: const PolylineId('opponent_to_correct'),
+            color: const Color(0xFF9C6BFF),
+            width: 3,
+            points: <LatLng>[
+              widget.opponentLocation!,
+              widget.correctLocation!,
+            ],
+          ),
+        );
+      }
+    }
+
+    if (widget.opponentLocation != null) {
+      markers.add(
+        Marker(
+          markerId: const MarkerId('opponent'),
+          position: widget.opponentLocation!,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueViolet),
+          infoWindow: InfoWindow(
+            title: widget.opponentMarkerTitle ?? '對手猜測',
+          ),
+        ),
+      );
     }
 
     if (widget.aiLocation != null) {
