@@ -42,6 +42,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   int _secondsPerRound = kSecondsPerRound;
   int _roundsPerGame = kRoundsPerGame;
   int _maxMoveSteps = 0;
+  bool _openingModeSelection = false;
 
   @override
   void initState() {
@@ -112,7 +113,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                         setState(() => _maxMoveSteps = v),
                   ),
                   const SizedBox(height: 16),
-                  _ContinueCta(onTap: _goToModeSelection),
+                  _ContinueCta(
+                    onTap: _goToModeSelection,
+                    enabled: !_openingModeSelection,
+                  ),
                   const SizedBox(height: 28),
                   const MatchdayFooterStripe(),
                 ],
@@ -133,24 +137,30 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _goToModeSelection() async {
+    if (_openingModeSelection) return;
+    setState(() => _openingModeSelection = true);
     AudioService.instance.playClick();
-    final GameSettings base = GameSettings(
-      region: _region,
-      secondsPerRound: _secondsPerRound,
-      roundsPerGame: _roundsPerGame,
-      maxMoveSteps: _maxMoveSteps,
-    );
-    await Navigator.push<void>(
-      context,
-      MaterialPageRoute<void>(
-        builder: (BuildContext context) =>
-            ModeSelectionPage(baseSettings: base),
-      ),
-    );
-    if (!mounted) return;
-    // 從選模式頁返回時確保 home BGM 還在；GamePage 進去會自己停，
-    // ModeSelectionPage 會在返回時 restart。這裡當雙重保險。
-    AudioService.instance.startHomeBgm();
+    try {
+      final GameSettings base = GameSettings(
+        region: _region,
+        secondsPerRound: _secondsPerRound,
+        roundsPerGame: _roundsPerGame,
+        maxMoveSteps: _maxMoveSteps,
+      );
+      await Navigator.push<void>(
+        context,
+        MaterialPageRoute<void>(
+          builder: (BuildContext context) =>
+              ModeSelectionPage(baseSettings: base),
+        ),
+      );
+      if (!mounted) return;
+      // 從選模式頁返回時確保 home BGM 還在；GamePage 進去會自己停，
+      // ModeSelectionPage 會在返回時 restart。這裡當雙重保險。
+      AudioService.instance.startHomeBgm();
+    } finally {
+      if (mounted) setState(() => _openingModeSelection = false);
+    }
   }
 }
 
@@ -637,7 +647,8 @@ class _TimeSlider extends StatelessWidget {
 // =============================================================================
 class _ContinueCta extends StatelessWidget {
   final VoidCallback onTap;
-  const _ContinueCta({required this.onTap});
+  final bool enabled;
+  const _ContinueCta({required this.onTap, this.enabled = true});
 
   @override
   Widget build(BuildContext context) {
@@ -651,8 +662,10 @@ class _ContinueCta extends StatelessWidget {
         child: Material(
           color: MatchdayPalette.ink,
           child: InkWell(
-            onTap: onTap,
-            child: Container(
+            onTap: enabled ? onTap : null,
+            child: Opacity(
+              opacity: enabled ? 1 : 0.55,
+              child: Container(
               padding: const EdgeInsets.fromLTRB(20, 18, 16, 18),
               child: Row(
                 children: <Widget>[
@@ -707,6 +720,7 @@ class _ContinueCta extends StatelessWidget {
                   ),
                 ],
               ),
+            ),
             ),
           ),
         ),

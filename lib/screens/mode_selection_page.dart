@@ -58,6 +58,7 @@ class _ModeSelectionPageState extends State<ModeSelectionPage>
     with TickerProviderStateMixin, WidgetsBindingObserver {
   bool _vsAi = false;
   AiStrength _aiStrength = AiStrength.medium;
+  bool _launching = false;
 
   // 環境動畫：驅動背景漸層飄動、邊框流動、卡片浮動。
   late final AnimationController _ambient;
@@ -114,24 +115,30 @@ class _ModeSelectionPageState extends State<ModeSelectionPage>
   }
 
   Future<void> _launch(GameMode mode) async {
+    if (_launching) return;
+    setState(() => _launching = true);
     AudioService.instance.playClick();
-    final GameSettings settings = widget.baseSettings.copyWith(
-      mode: mode,
-      maxMoveSteps:
-          mode == GameMode.move ? widget.baseSettings.maxMoveSteps : 0,
-      vsAi: _vsAi,
-      aiStrength: _aiStrength,
-    );
-    await AudioService.instance.stopHomeBgm();
-    if (!mounted) return;
-    await Navigator.push<void>(
-      context,
-      MaterialPageRoute<void>(
-        builder: (BuildContext context) => GamePage(settings: settings),
-      ),
-    );
-    if (!mounted) return;
-    AudioService.instance.startHomeBgm();
+    try {
+      final GameSettings settings = widget.baseSettings.copyWith(
+        mode: mode,
+        maxMoveSteps:
+            mode == GameMode.move ? widget.baseSettings.maxMoveSteps : 0,
+        vsAi: _vsAi,
+        aiStrength: _aiStrength,
+      );
+      await AudioService.instance.stopHomeBgm();
+      if (!mounted) return;
+      await Navigator.push<void>(
+        context,
+        MaterialPageRoute<void>(
+          builder: (BuildContext context) => GamePage(settings: settings),
+        ),
+      );
+      if (!mounted) return;
+      AudioService.instance.startHomeBgm();
+    } finally {
+      if (mounted) setState(() => _launching = false);
+    }
   }
 
   @override
@@ -167,7 +174,9 @@ class _ModeSelectionPageState extends State<ModeSelectionPage>
           // ---- 內容
           SafeArea(
             bottom: false,
-            child: SingleChildScrollView(
+            child: AbsorbPointer(
+              absorbing: _launching,
+              child: SingleChildScrollView(
               physics: const BouncingScrollPhysics(),
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
@@ -257,7 +266,20 @@ class _ModeSelectionPageState extends State<ModeSelectionPage>
                 ),
               ),
             ),
+            ),
           ),
+          if (_launching)
+            const Positioned.fill(
+              child: ColoredBox(
+                color: Color(0x22000000),
+                child: Center(
+                  child: CircularProgressIndicator(
+                    color: Colors.white,
+                    strokeWidth: 2.5,
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );

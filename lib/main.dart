@@ -52,6 +52,8 @@ class GeoGuesserApp extends StatefulWidget {
 }
 
 class _GeoGuesserAppState extends State<GeoGuesserApp> {
+  bool _pushingDuelGame = false;
+
   @override
   void initState() {
     super.initState();
@@ -93,17 +95,27 @@ class _GeoGuesserAppState extends State<GeoGuesserApp> {
     unawaited(showDuelInviteDialog(ctx, invite));
   }
 
+  Future<void> _pushDuelGamePage(Widget page) async {
+    if (_pushingDuelGame) return;
+    _pushingDuelGame = true;
+    try {
+      AudioService.instance.stopHomeBgm();
+      final NavigatorState? nav = appNavigatorKey.currentState;
+      if (nav == null) return;
+      await nav.push<void>(
+        MaterialPageRoute<void>(builder: (BuildContext context) => page),
+      );
+    } finally {
+      _pushingDuelGame = false;
+    }
+  }
+
   void _onPendingDuelStart() {
     final DuelStartEvent? event = RealtimeService.instance.pendingDuelStart.value;
     if (event == null) return;
     RealtimeService.instance.pendingDuelStart.value = null;
 
-    AudioService.instance.stopHomeBgm();
-    appNavigatorKey.currentState?.push(
-      MaterialPageRoute<void>(
-        builder: (BuildContext context) => GamePage(settings: event.settings),
-      ),
-    );
+    unawaited(_pushDuelGamePage(GamePage(settings: event.settings)));
   }
 
   void _onPendingDuelResync() {
@@ -111,10 +123,9 @@ class _GeoGuesserAppState extends State<GeoGuesserApp> {
     if (sync == null) return;
     RealtimeService.instance.pendingDuelResync.value = null;
 
-    AudioService.instance.stopHomeBgm();
-    appNavigatorKey.currentState?.push(
-      MaterialPageRoute<void>(
-        builder: (BuildContext context) => GamePage(
+    unawaited(
+      _pushDuelGamePage(
+        GamePage(
           settings: sync.settings,
           duelResume: sync.toResumeState(),
         ),
