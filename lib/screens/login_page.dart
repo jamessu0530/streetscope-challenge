@@ -49,11 +49,17 @@ class _LoginPageState extends State<LoginPage> {
     return m.contains('尚未註冊');
   }
 
+  void _clearSnackBars() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
+  }
+
   Future<void> _finishSignIn(
     AuthUser user, {
     String Function(AuthUser user)? successMessage,
   }) async {
     if (!mounted) return;
+    _clearSnackBars();
     final String welcome =
         successMessage?.call(AuthService.instance.currentUser.value ?? user) ??
             '歡迎，${(AuthService.instance.currentUser.value ?? user).displayName}';
@@ -70,6 +76,7 @@ class _LoginPageState extends State<LoginPage> {
   }) async {
     if (_busy != null) return;
     AudioService.instance.playClick();
+    _clearSnackBars();
     setState(() => _busy = provider);
     try {
       final AuthUser user = await action();

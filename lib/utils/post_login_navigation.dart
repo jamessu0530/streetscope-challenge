@@ -30,10 +30,12 @@ Future<void> completeLoginAndReturnHome(
 }) async {
   if (!loginContext.mounted) return;
 
+  ScaffoldMessenger.of(loginContext).clearSnackBars();
   Navigator.of(loginContext).popUntil((Route<dynamic> route) => route.isFirst);
 
   final BuildContext? root = appNavigatorKey.currentContext;
   if (root == null || !root.mounted) return;
+  ScaffoldMessenger.of(root).clearSnackBars();
 
   final AuthUser? user = AuthService.instance.currentUser.value;
   if (user == null) return;
